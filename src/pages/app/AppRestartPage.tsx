@@ -4,6 +4,7 @@ import { useCustomerEntitlements } from '@/hooks/useCustomerEntitlements';
 import { Button } from '@/components/design-system/Button';
 import { Card } from '@/components/design-system/Card';
 import { GridPattern } from '@/components/design-system/GridPattern';
+import { RestartSubNav } from '@/components/navigation/RestartSubNav';
 import {
   GraduationCap,
   Award,
@@ -182,6 +183,9 @@ export const AppRestartPage: React.FC = () => {
 
   return (
     <div className="space-y-12 pb-16" dir={isArabic ? 'rtl' : 'ltr'}>
+      {/* ZIRON RESTART Sub-Navigation Ribbon */}
+      <RestartSubNav activeItem="overview" />
+
       {/* 1. HERO DOSSIER */}
       <section className="relative bg-[#0B2346] text-white border border-[#1E3A8A] p-6 sm:p-10 overflow-hidden shadow-sm">
         <GridPattern opacity={0.07} />
@@ -637,6 +641,25 @@ export const AppRestartPage: React.FC = () => {
                 ? 'Cette section présente un jalon prospectif. Aucune demande de subvention, aucun paiement et aucune distribution de fonds ne sont actifs dans cette phase.'
                 : 'This section details a future conceptual milestone. Grant applications, payment rails, eligibility scoring, and fund disbursements are strictly inactive during this platform foundation phase.'}
             </p>
+          </div>
+
+          <div className="pt-2">
+            <Button
+              id="restart-page-view-fund-info-btn"
+              variant="outline"
+              size="sm"
+              onClick={() => navigate('restart/fund')}
+              className="border-amber-400 text-amber-950 hover:bg-amber-100 bg-white font-mono text-xs font-bold uppercase tracking-wider cursor-pointer"
+            >
+              <Coins className="w-3.5 h-3.5 mr-1.5 rtl:mr-0 rtl:ml-1.5 text-amber-600" />
+              <span>
+                {isArabic
+                  ? 'معلومات صندوق RESTART الكاملة'
+                  : isFrench
+                  ? 'Détails Officiels du Fonds RESTART'
+                  : 'View RESTART Fund Details'}
+              </span>
+            </Button>
           </div>
         </div>
       </section>

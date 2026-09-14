@@ -31,6 +31,7 @@ export const PublicShell: React.FC<{ children: React.ReactNode }> = ({ children 
     { label: content.nav.community, route: 'community' },
     { label: content.nav.school, route: 'school' },
     { label: content.nav.restart, route: 'restart' },
+    { label: content.nav.restartFund || 'Restart Fund', route: 'restart/fund' },
     { label: content.nav.faq, route: 'faq' },
     { label: content.nav.shop, route: 'shop' },
     { label: content.nav.about, route: 'about' },

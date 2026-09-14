@@ -11,6 +11,7 @@ export type PublicRoute =
   | 'shop'
   | 'about'
   | 'restart'
+  | 'restart/fund'
   | 'faq'
   | 'login'
   | 'register'
@@ -27,6 +28,7 @@ export type PublicRoute =
   | 'app/school/opportunities'
   | `app/school/courses/${string}`
   | 'app/restart'
+  | 'app/restart/fund'
   | 'app/rewards'
   | 'app/certificates'
   | 'app/profile'

@@ -24,6 +24,7 @@ import {
   ExternalLink,
   Globe,
   Sparkles,
+  Coins,
 } from 'lucide-react';
 
 interface NavItem {
@@ -198,21 +199,37 @@ export const CustomerAppShell: React.FC<{ children: React.ReactNode }> = ({ chil
             </span>
           </div>
 
-          <div className="flex items-center gap-3">
-            {/* ZIRON RESTART Platform Hub */}
-            <button
-              id="customer-restart-hub-btn"
-              onClick={() => navigate('app/restart')}
-              className={`text-[10px] uppercase font-mono font-bold tracking-wider inline-flex items-center gap-1 cursor-pointer px-2 py-0.5 border transition-colors ${
-                route === 'app/restart'
-                  ? 'bg-amber-400 text-[#0B2346] border-amber-300 shadow-xs'
-                  : 'text-amber-200 hover:text-white border-amber-400/50 hover:border-amber-300 bg-amber-950/30'
-              }`}
-              title="ZIRON RESTART Platform"
-            >
-              <Sparkles className="w-2.5 h-2.5 text-amber-300" />
-              <span>RESTART</span>
-            </button>
+          <div className="flex items-center gap-2 sm:gap-3">
+            {/* ZIRON RESTART Platform Group */}
+            <div className="flex items-center gap-1.5">
+              <button
+                id="customer-restart-hub-btn"
+                onClick={() => navigate('app/restart')}
+                className={`text-[10px] uppercase font-mono font-bold tracking-wider inline-flex items-center gap-1 cursor-pointer px-2 py-0.5 border transition-colors ${
+                  route === 'app/restart'
+                    ? 'bg-amber-400 text-[#0B2346] border-amber-300 shadow-xs'
+                    : 'text-amber-200 hover:text-white border-amber-400/50 hover:border-amber-300 bg-amber-950/30'
+                }`}
+                title="ZIRON RESTART Platform"
+              >
+                <Sparkles className="w-2.5 h-2.5 text-amber-300" />
+                <span>RESTART</span>
+              </button>
+
+              <button
+                id="customer-restart-fund-btn"
+                onClick={() => navigate('restart/fund')}
+                className={`text-[10px] uppercase font-mono font-bold tracking-wider inline-flex items-center gap-1 cursor-pointer px-2 py-0.5 border transition-colors ${
+                  route === 'restart/fund' || route === 'app/restart/fund'
+                    ? 'bg-amber-400 text-[#0B2346] border-amber-300 shadow-xs'
+                    : 'text-amber-200 hover:text-white border-amber-400/50 hover:border-amber-300 bg-amber-950/30'
+                }`}
+                title="ZIRON RESTART Fund"
+              >
+                <Coins className="w-2.5 h-2.5 text-amber-300" />
+                <span>{locale === 'ar' ? 'صندوق RESTART' : locale === 'fr' ? 'FONDS RESTART' : 'RESTART FUND'}</span>
+              </button>
+            </div>
 
             {isStaff && (
               <button
@@ -362,6 +379,26 @@ export const CustomerAppShell: React.FC<{ children: React.ReactNode }> = ({ chil
                   </button>
                 );
               })}
+
+              {/* RESTART FUND Customer Navigation Item */}
+              <div className="ms-auto flex items-center shrink-0">
+                <button
+                  id="customer-nav-desktop-restart-fund"
+                  onClick={() => handleNav('restart/fund')}
+                  title={locale === 'ar' ? 'صندوق ZIRON RESTART المستقبلي' : locale === 'fr' ? 'Fonds ZIRON RESTART' : 'ZIRON RESTART Fund'}
+                  className={`px-2.5 xl:px-3 py-1.5 text-xs font-bold uppercase tracking-wider transition-colors inline-flex items-center gap-1.5 cursor-pointer shrink-0 border-b-2 ${
+                    route === 'restart/fund' || route === 'app/restart/fund'
+                      ? 'text-amber-900 border-amber-600 bg-amber-50 shadow-2xs font-black'
+                      : 'text-amber-800 hover:text-amber-950 hover:bg-amber-50/70 border-transparent'
+                  }`}
+                >
+                  <Coins className={`w-3.5 h-3.5 shrink-0 ${route === 'restart/fund' || route === 'app/restart/fund' ? 'text-amber-600' : 'text-amber-500'}`} />
+                  <span>{locale === 'ar' ? 'صندوق RESTART' : locale === 'fr' ? 'FONDS RESTART' : 'RESTART FUND'}</span>
+                  <span className="text-[8px] font-mono px-1 py-0.2 bg-amber-600 text-white font-bold tracking-tighter">
+                    {locale === 'ar' ? 'قريبًا' : locale === 'fr' ? 'BIENTÔT' : 'SOON'}
+                  </span>
+                </button>
+              </div>
             </nav>
           </div>
         </div>
@@ -435,6 +472,30 @@ export const CustomerAppShell: React.FC<{ children: React.ReactNode }> = ({ chil
                   </button>
                 );
               })}
+
+              {/* RESTART FUND Mobile Navigation Item */}
+              <button
+                id="customer-nav-mobile-restart-fund"
+                onClick={() => {
+                  handleNav('restart/fund');
+                  setMobileMenuOpen(false);
+                }}
+                className={`w-full flex flex-col items-start px-3 py-2.5 text-xs font-bold uppercase tracking-wider transition-colors cursor-pointer text-start ${
+                  route === 'restart/fund' || route === 'app/restart/fund'
+                    ? 'bg-amber-500 text-[#0B2346]'
+                    : 'bg-amber-50 text-amber-900 hover:bg-amber-100 border border-amber-200'
+                }`}
+              >
+                <div className="w-full flex items-center justify-between">
+                  <div className="flex items-center gap-2.5">
+                    <Coins className={`w-4 h-4 ${route === 'restart/fund' || route === 'app/restart/fund' ? 'text-[#0B2346]' : 'text-amber-600'}`} />
+                    <span>{locale === 'ar' ? 'صندوق RESTART' : locale === 'fr' ? 'FONDS RESTART' : 'RESTART FUND'}</span>
+                  </div>
+                  <span className="text-[8px] font-mono px-1.5 py-0.5 bg-amber-600 text-white font-bold">
+                    {locale === 'ar' ? 'قريبًا' : locale === 'fr' ? 'BIENTÔT' : 'SOON'}
+                  </span>
+                </div>
+              </button>
             </div>
           </div>
         )}

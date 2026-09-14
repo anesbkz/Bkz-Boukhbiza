@@ -31,6 +31,7 @@ export interface SiteContent {
     shop: string;
     about: string;
     restart: string;
+    restartFund?: string;
     faq: string;
     login: string;
     register: string;

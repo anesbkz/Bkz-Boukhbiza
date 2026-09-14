@@ -1,6 +1,6 @@
 import React from 'react';
 import { I18nProvider, useI18n } from '@/context/I18nContext';
-import { AuthProvider } from '@/context/AuthContext';
+import { AuthProvider, useAuth } from '@/context/AuthContext';
 import { PublicShell } from '@/components/shells/PublicShell';
 import { AdminShell } from '@/components/shells/AdminShell';
 import { CustomerAppShell } from '@/components/shells/CustomerAppShell';
@@ -15,6 +15,7 @@ import { VerifyPage } from '@/pages/VerifyPage';
 import { ShopPage } from '@/pages/ShopPage';
 import { AboutPage } from '@/pages/AboutPage';
 import { RestartPage } from '@/pages/RestartPage';
+import { RestartFundPage } from '@/pages/RestartFundPage';
 import { FaqPage } from '@/pages/FaqPage';
 import { LoginPage } from '@/pages/LoginPage';
 import { RegisterPage } from '@/pages/RegisterPage';
@@ -51,6 +52,23 @@ import { AdminRouteGuard } from '@/components/guards/AdminRouteGuard';
 
 function RouterOutlet() {
   const { route } = useI18n();
+  const { user } = useAuth();
+
+  // ZIRON Restart Fund route (/restart/fund and /app/restart/fund)
+  if (route === 'restart/fund' || route === 'app/restart/fund') {
+    if (user) {
+      return (
+        <CustomerAppShell>
+          <RestartFundPage />
+        </CustomerAppShell>
+      );
+    }
+    return (
+      <PublicShell>
+        <RestartFundPage />
+      </PublicShell>
+    );
+  }
 
   // Admin routes routed through AdminShell
   if (route.startsWith('admin')) {
@@ -365,6 +383,9 @@ function RouterOutlet() {
       break;
     case 'restart':
       publicContent = <RestartPage />;
+      break;
+    case 'restart/fund':
+      publicContent = <RestartFundPage />;
       break;
     case 'faq':
       publicContent = <FaqPage />;
