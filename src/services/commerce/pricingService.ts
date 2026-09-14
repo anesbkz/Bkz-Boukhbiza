@@ -251,11 +251,11 @@ export function calculateAuthoritativeSubtotal(
 /**
  * Computes authoritative shipping cost based on subtotal and destination.
  */
-export function calculateAuthoritativeShippingCost(subtotal: number, _wilaya?: string): number {
+export function calculateAuthoritativeShippingCost(subtotal: number, wilaya?: string): number {
   if (subtotal >= FREE_SHIPPING_THRESHOLD_DZD) {
     return 0; // Free shipping for high value orders / full bundles
   }
-  return STANDARD_SHIPPING_COST_DZD;
+  return getWilayaShippingCost(wilaya);
 }
 
 /**

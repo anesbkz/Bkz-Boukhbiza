@@ -5249,6 +5249,101 @@ export const updateCommerceInventory = functions.https.onCall(async (data, conte
   return { success: true, inventory: result };
 });
 
+const COMMERCE_WILAYA_SHIPPING_TIERS: Record<string, number> = {
+  // Algiers (Wilaya 16)
+  'alger': 600,
+  'algiers': 600,
+  '16': 600,
+
+  // Coastal / Central proximity
+  'oran': 800,
+  '31': 800,
+  'blida': 800,
+  '09': 800,
+  '9': 800,
+  'tipaza': 800,
+  '42': 800,
+  'boumerdes': 800,
+  '35': 800,
+  'annaba': 800,
+  '23': 800,
+  'tizi ouzou': 800,
+  '15': 800,
+  'bejaia': 800,
+  '06': 800,
+  '6': 800,
+  'mostaganem': 800,
+  '27': 800,
+  'chlef': 800,
+  '02': 800,
+  '2': 800,
+
+  // Inland / Highlands
+  'setif': 1000,
+  '19': 1000,
+  'constantine': 1000,
+  '25': 1000,
+  'batna': 1000,
+  '05': 1000,
+  '5': 1000,
+  'medea': 1000,
+  '26': 1000,
+  'tlemcen': 1000,
+  '13': 1000,
+  'sidi bel abbes': 1000,
+  '22': 1000,
+  'djelfa': 1000,
+  '17': 1000,
+  'msila': 1000,
+  '28': 1000,
+
+  // Southern / Sahara wilayas
+  'adrar': 1400,
+  '01': 1400,
+  '1': 1400,
+  'tamanrasset': 1400,
+  '11': 1400,
+  'ghardaia': 1400,
+  '47': 1400,
+  'ouargla': 1400,
+  '30': 1400,
+  'bechar': 1400,
+  '08': 1400,
+  '8': 1400,
+  'biskra': 1400,
+  '07': 1400,
+  '7': 1400,
+  'el oued': 1400,
+  '39': 1400,
+  'tindouf': 1400,
+  '37': 1400,
+  'illizi': 1400,
+  '33': 1400,
+};
+
+function getAuthoritativeWilayaShippingCost(wilaya?: string): number {
+  if (!wilaya) return 1000;
+  const key = wilaya.trim().toLowerCase();
+  return COMMERCE_WILAYA_SHIPPING_TIERS[key] || 1000;
+}
+
+const VALID_ORDER_TRANSITIONS: Record<string, string[]> = {
+  PENDING: ['CONFIRMED', 'PROCESSING', 'CANCELLED'],
+  CONFIRMED: ['PROCESSING', 'CANCELLED'],
+  PROCESSING: ['SHIPPED', 'CANCELLED'],
+  SHIPPED: ['DELIVERED', 'CANCELLED'],
+  DELIVERED: [], // Terminal
+  CANCELLED: [], // Terminal
+};
+
+const VALID_PAYMENT_TRANSITIONS: Record<string, string[]> = {
+  UNPAID: ['PENDING', 'PAID', 'FAILED'],
+  PENDING: ['PAID', 'FAILED', 'UNPAID'],
+  PAID: ['REFUNDED'],
+  FAILED: ['PENDING', 'UNPAID'],
+  REFUNDED: [], // Terminal
+};
+
 /**
  * Callable Function: Authoritative Customer Order Creation
  * Validates authentication, products, availability, loads authoritative prices,
@@ -5276,12 +5371,17 @@ export const createCustomerOrder = functions.https.onCall(async (data, context) 
 
   const { items, shippingAddress, idempotencyKey } = data || {};
 
-  // 1. Idempotency Check
-  if (idempotencyKey && typeof idempotencyKey === 'string' && idempotencyKey.trim().length > 0) {
+  // 1. Validate idempotencyKey if provided
+  const trimmedIdempotencyKey =
+    idempotencyKey && typeof idempotencyKey === 'string' && idempotencyKey.trim().length > 0
+      ? idempotencyKey.trim()
+      : null;
+
+  if (trimmedIdempotencyKey) {
     const existingOrdersSnap = await db
       .collection('orders')
       .where('userId', '==', callerUid)
-      .where('idempotencyKey', '==', idempotencyKey.trim())
+      .where('idempotencyKey', '==', trimmedIdempotencyKey)
       .limit(1)
       .get();
 
@@ -5471,8 +5571,8 @@ export const createCustomerOrder = functions.https.onCall(async (data, context) 
       transaction.set(update.ref, update.updateData, { merge: true });
     }
 
-    // Calculate Authoritative Shipping and Total
-    const shippingCost = subtotal >= 9000 ? 0 : 600; // Free shipping on complete bundle or orders >= 9000 DZD
+    // Calculate Authoritative Shipping and Total using Wilaya tiers
+    const shippingCost = subtotal >= 9000 ? 0 : getAuthoritativeWilayaShippingCost(wilaya);
     const total = subtotal + shippingCost;
 
     const orderRef = db.collection('orders').doc();
@@ -5509,7 +5609,7 @@ export const createCustomerOrder = functions.https.onCall(async (data, context) 
         address: address.trim(),
         notes: notes ? String(notes).trim() : '',
       },
-      idempotencyKey: idempotencyKey ? String(idempotencyKey).trim() : null,
+      idempotencyKey: trimmedIdempotencyKey,
       history: [
         {
           status: 'PENDING',
@@ -5540,6 +5640,8 @@ export const createCustomerOrder = functions.https.onCall(async (data, context) 
           subtotal,
           shippingCost,
           total,
+          currency: 'DZD',
+          wilaya,
           itemCount: orderItems.length,
         },
       },
@@ -5569,78 +5671,108 @@ export const updateOrderStatus = functions.https.onCall(async (data, context) =>
   }
 
   const orderRef = db.collection('orders').doc(orderId);
-  const snap = await orderRef.get();
-  if (!snap.exists) {
-    throw new functions.https.HttpsError('not-found', `Order ${orderId} not found.`);
-  }
-
-  const currentOrder = snap.data()!;
   const now = new Date().toISOString();
 
-  // If transitioning to CANCELLED and was not previously CANCELLED, restore inventory
-  if (status === 'CANCELLED' && currentOrder.status !== 'CANCELLED') {
-    const batch = db.batch();
-    for (const item of currentOrder.items || []) {
-      const invId = `inv-${item.sku.toLowerCase()}`;
-      const invRef = db.collection('inventory').doc(invId);
-      const invSnap = await invRef.get();
-      if (invSnap.exists) {
-        const invData = invSnap.data()!;
-        const available = (invData.availableQuantity ?? 0) + item.quantity;
-        const reserved = Math.max(0, (invData.reservedQuantity ?? 0) - item.quantity);
-        const threshold = invData.lowStockThreshold ?? 10;
-        const newStatus =
-          available <= 0 ? 'OUT_OF_STOCK' : available <= threshold ? 'LOW_STOCK' : 'IN_STOCK';
+  const result = await db.runTransaction(async (transaction) => {
+    const snap = await transaction.get(orderRef);
+    if (!snap.exists) {
+      throw new functions.https.HttpsError('not-found', `Order ${orderId} not found.`);
+    }
 
-        batch.update(invRef, {
-          availableQuantity: available,
-          reservedQuantity: reserved,
-          status: newStatus,
-          updatedAt: now,
-        });
+    const currentOrder = snap.data()!;
+
+    // Idempotent no-op
+    if (currentOrder.status === status) {
+      return { order: { id: snap.id, ...currentOrder }, unchanged: true, previousStatus: currentOrder.status };
+    }
+
+    // State Machine Validation
+    const allowed = VALID_ORDER_TRANSITIONS[currentOrder.status] || [];
+    if (!allowed.includes(status)) {
+      throw new functions.https.HttpsError(
+        'failed-precondition',
+        `Invalid order status transition from ${currentOrder.status} to ${status}. Allowed: ${allowed.length > 0 ? allowed.join(', ') : 'None (terminal state)'}.`
+      );
+    }
+
+    // If transitioning to CANCELLED, restore inventory
+    if (status === 'CANCELLED') {
+      for (const item of currentOrder.items || []) {
+        const invId = `inv-${item.sku.toLowerCase()}`;
+        const invRef = db.collection('inventory').doc(invId);
+        const invSnap = await transaction.get(invRef);
+        if (invSnap.exists) {
+          const invData = invSnap.data()!;
+          const isPaid = currentOrder.paymentStatus === 'PAID';
+          const available = (invData.availableQuantity ?? 0) + item.quantity;
+          const reserved = isPaid
+            ? (invData.reservedQuantity ?? 0)
+            : Math.max(0, (invData.reservedQuantity ?? 0) - item.quantity);
+          const sold = isPaid
+            ? Math.max(0, (invData.soldQuantity ?? 0) - item.quantity)
+            : (invData.soldQuantity ?? 0);
+          const threshold = invData.lowStockThreshold ?? 10;
+          const newStatus =
+            available <= 0 ? 'OUT_OF_STOCK' : available <= threshold ? 'LOW_STOCK' : 'IN_STOCK';
+
+          transaction.update(invRef, {
+            availableQuantity: available,
+            reservedQuantity: reserved,
+            soldQuantity: sold,
+            status: newStatus,
+            updatedAt: now,
+          });
+        }
       }
     }
-    await batch.commit();
-  }
 
-  const historyEntry = {
-    status,
-    paymentStatus: currentOrder.paymentStatus,
-    fulfillmentStatus:
-      status === 'DELIVERED'
-        ? 'DELIVERED'
-        : status === 'SHIPPED'
-        ? 'SHIPPED'
-        : status === 'PROCESSING'
-        ? 'PROCESSING'
-        : currentOrder.fulfillmentStatus,
-    timestamp: now,
-    actorUserId: callerUid,
-    note: note || `Order status updated to ${status}`,
-  };
+    const historyEntry = {
+      status,
+      paymentStatus: currentOrder.paymentStatus,
+      fulfillmentStatus:
+        status === 'DELIVERED'
+          ? 'DELIVERED'
+          : status === 'SHIPPED'
+          ? 'SHIPPED'
+          : status === 'PROCESSING'
+          ? 'PROCESSING'
+          : currentOrder.fulfillmentStatus,
+      timestamp: now,
+      actorUserId: callerUid,
+      note: note || `Order status updated to ${status}`,
+    };
 
-  const updates: Record<string, any> = {
-    status,
-    fulfillmentStatus: historyEntry.fulfillmentStatus,
-    history: admin.firestore.FieldValue.arrayUnion(historyEntry),
-    updatedAt: now,
-  };
+    const updates: Record<string, any> = {
+      status,
+      fulfillmentStatus: historyEntry.fulfillmentStatus,
+      history: admin.firestore.FieldValue.arrayUnion(historyEntry),
+      updatedAt: now,
+    };
 
-  await orderRef.update(updates);
+    transaction.update(orderRef, updates);
 
-  await writeAuthoritativeAuditLog(db, {
-    actorUserId: callerUid,
-    actorEmail: callerEmail,
-    actorRoles: callerRoles,
-    action: 'ORDER_STATUS_CHANGED',
-    resourceType: 'orders',
-    resourceId: orderId,
-    metadata: {
+    return {
+      order: { id: snap.id, ...currentOrder, ...updates },
+      unchanged: false,
       previousStatus: currentOrder.status,
-      newStatus: status,
-      note,
-    },
+    };
   });
+
+  if (!result.unchanged) {
+    await writeAuthoritativeAuditLog(db, {
+      actorUserId: callerUid,
+      actorEmail: callerEmail,
+      actorRoles: callerRoles,
+      action: 'ORDER_STATUS_CHANGED',
+      resourceType: 'orders',
+      resourceId: orderId,
+      metadata: {
+        previousStatus: result.previousStatus,
+        newStatus: status,
+        note,
+      },
+    });
+  }
 
   const updatedDoc = await orderRef.get();
   return { success: true, order: { id: updatedDoc.id, ...updatedDoc.data() } };
@@ -5663,63 +5795,86 @@ export const updatePaymentStatus = functions.https.onCall(async (data, context) 
   }
 
   const orderRef = db.collection('orders').doc(orderId);
-  const snap = await orderRef.get();
-  if (!snap.exists) {
-    throw new functions.https.HttpsError('not-found', `Order ${orderId} not found.`);
-  }
-
-  const currentOrder = snap.data()!;
   const now = new Date().toISOString();
 
-  // If moving from UNPAID/PENDING to PAID: move items from reservedQuantity to soldQuantity
-  if (paymentStatus === 'PAID' && currentOrder.paymentStatus !== 'PAID') {
-    const batch = db.batch();
-    for (const item of currentOrder.items || []) {
-      const invId = `inv-${item.sku.toLowerCase()}`;
-      const invRef = db.collection('inventory').doc(invId);
-      const invSnap = await invRef.get();
-      if (invSnap.exists) {
-        const invData = invSnap.data()!;
-        const reserved = Math.max(0, (invData.reservedQuantity ?? 0) - item.quantity);
-        const sold = (invData.soldQuantity ?? 0) + item.quantity;
-        batch.update(invRef, {
-          reservedQuantity: reserved,
-          soldQuantity: sold,
-          updatedAt: now,
-        });
+  const result = await db.runTransaction(async (transaction) => {
+    const snap = await transaction.get(orderRef);
+    if (!snap.exists) {
+      throw new functions.https.HttpsError('not-found', `Order ${orderId} not found.`);
+    }
+
+    const currentOrder = snap.data()!;
+
+    // Idempotent no-op
+    if (currentOrder.paymentStatus === paymentStatus) {
+      return { order: { id: snap.id, ...currentOrder }, unchanged: true, previousPaymentStatus: currentOrder.paymentStatus };
+    }
+
+    // State Machine Validation
+    const allowed = VALID_PAYMENT_TRANSITIONS[currentOrder.paymentStatus] || [];
+    if (!allowed.includes(paymentStatus)) {
+      throw new functions.https.HttpsError(
+        'failed-precondition',
+        `Invalid payment status transition from ${currentOrder.paymentStatus} to ${paymentStatus}. Allowed: ${allowed.length > 0 ? allowed.join(', ') : 'None (terminal state)'}.`
+      );
+    }
+
+    // If moving to PAID: move items from reservedQuantity to soldQuantity
+    if (paymentStatus === 'PAID' && currentOrder.paymentStatus !== 'PAID') {
+      for (const item of currentOrder.items || []) {
+        const invId = `inv-${item.sku.toLowerCase()}`;
+        const invRef = db.collection('inventory').doc(invId);
+        const invSnap = await transaction.get(invRef);
+        if (invSnap.exists) {
+          const invData = invSnap.data()!;
+          const reserved = Math.max(0, (invData.reservedQuantity ?? 0) - item.quantity);
+          const sold = (invData.soldQuantity ?? 0) + item.quantity;
+          transaction.update(invRef, {
+            reservedQuantity: reserved,
+            soldQuantity: sold,
+            updatedAt: now,
+          });
+        }
       }
     }
-    await batch.commit();
-  }
 
-  const historyEntry = {
-    status: currentOrder.status,
-    paymentStatus,
-    fulfillmentStatus: currentOrder.fulfillmentStatus,
-    timestamp: now,
-    actorUserId: callerUid,
-    note: note || `Payment status updated to ${paymentStatus}`,
-  };
+    const historyEntry = {
+      status: currentOrder.status,
+      paymentStatus,
+      fulfillmentStatus: currentOrder.fulfillmentStatus,
+      timestamp: now,
+      actorUserId: callerUid,
+      note: note || `Payment status updated to ${paymentStatus}`,
+    };
 
-  await orderRef.update({
-    paymentStatus,
-    history: admin.firestore.FieldValue.arrayUnion(historyEntry),
-    updatedAt: now,
-  });
+    transaction.update(orderRef, {
+      paymentStatus,
+      history: admin.firestore.FieldValue.arrayUnion(historyEntry),
+      updatedAt: now,
+    });
 
-  await writeAuthoritativeAuditLog(db, {
-    actorUserId: callerUid,
-    actorEmail: callerEmail,
-    actorRoles: callerRoles,
-    action: 'PAYMENT_STATUS_CHANGED',
-    resourceType: 'orders',
-    resourceId: orderId,
-    metadata: {
+    return {
+      order: { id: snap.id, ...currentOrder, paymentStatus },
+      unchanged: false,
       previousPaymentStatus: currentOrder.paymentStatus,
-      newPaymentStatus: paymentStatus,
-      note,
-    },
+    };
   });
+
+  if (!result.unchanged) {
+    await writeAuthoritativeAuditLog(db, {
+      actorUserId: callerUid,
+      actorEmail: callerEmail,
+      actorRoles: callerRoles,
+      action: 'PAYMENT_STATUS_CHANGED',
+      resourceType: 'orders',
+      resourceId: orderId,
+      metadata: {
+        previousPaymentStatus: result.previousPaymentStatus,
+        newPaymentStatus: paymentStatus,
+        note,
+      },
+    });
+  }
 
   const updatedDoc = await orderRef.get();
   return { success: true, order: { id: updatedDoc.id, ...updatedDoc.data() } };
@@ -5751,84 +5906,102 @@ export const cancelCustomerOrder = functions.https.onCall(async (data, context) 
     callerRoles.includes('ORDER_MANAGER');
 
   const orderRef = db.collection('orders').doc(orderId);
-  const snap = await orderRef.get();
-  if (!snap.exists) {
-    throw new functions.https.HttpsError('not-found', `Order ${orderId} not found.`);
-  }
-
-  const order = snap.data()!;
-  if (!isStaffCaller && order.userId !== callerUid) {
-    throw new functions.https.HttpsError('permission-denied', 'Cannot cancel an order belonging to another user.');
-  }
-
-  if (!isStaffCaller) {
-    if (order.status !== 'PENDING' || order.paymentStatus !== 'UNPAID') {
-      throw new functions.https.HttpsError(
-        'failed-precondition',
-        'Customers can only cancel orders that are PENDING and UNPAID. For processing or paid orders, please contact support.'
-      );
-    }
-  }
-
-  if (order.status === 'CANCELLED') {
-    return { success: true, order: { id: snap.id, ...order } };
-  }
-
   const now = new Date().toISOString();
 
-  // Restore inventory
-  const batch = db.batch();
-  for (const item of order.items || []) {
-    const invId = `inv-${item.sku.toLowerCase()}`;
-    const invRef = db.collection('inventory').doc(invId);
-    const invSnap = await invRef.get();
-    if (invSnap.exists) {
-      const invData = invSnap.data()!;
-      const available = (invData.availableQuantity ?? 0) + item.quantity;
-      const reserved = Math.max(0, (invData.reservedQuantity ?? 0) - item.quantity);
-      const threshold = invData.lowStockThreshold ?? 10;
-      const newStatus =
-        available <= 0 ? 'OUT_OF_STOCK' : available <= threshold ? 'LOW_STOCK' : 'IN_STOCK';
-
-      batch.update(invRef, {
-        availableQuantity: available,
-        reservedQuantity: reserved,
-        status: newStatus,
-        updatedAt: now,
-      });
+  // Atomic cancellation & stock restoration inside transaction
+  const result = await db.runTransaction(async (transaction) => {
+    const snap = await transaction.get(orderRef);
+    if (!snap.exists) {
+      throw new functions.https.HttpsError('not-found', `Order ${orderId} not found.`);
     }
+
+    const order = snap.data()!;
+    if (!isStaffCaller && order.userId !== callerUid) {
+      throw new functions.https.HttpsError('permission-denied', 'Cannot cancel an order belonging to another user.');
+    }
+
+    if (order.status === 'CANCELLED') {
+      return { order: { id: snap.id, ...order }, alreadyCancelled: true };
+    }
+
+    if (!isStaffCaller) {
+      if (order.status !== 'PENDING' || order.paymentStatus !== 'UNPAID') {
+        throw new functions.https.HttpsError(
+          'failed-precondition',
+          'Customers can only cancel orders that are PENDING and UNPAID. For processing or paid orders, please contact support.'
+        );
+      }
+    } else {
+      if (order.status === 'DELIVERED') {
+        throw new functions.https.HttpsError(
+          'failed-precondition',
+          'Delivered orders cannot be cancelled.'
+        );
+      }
+    }
+
+    // Restore inventory
+    for (const item of order.items || []) {
+      const invId = `inv-${item.sku.toLowerCase()}`;
+      const invRef = db.collection('inventory').doc(invId);
+      const invSnap = await transaction.get(invRef);
+      if (invSnap.exists) {
+        const invData = invSnap.data()!;
+        const isPaid = order.paymentStatus === 'PAID';
+        const available = (invData.availableQuantity ?? 0) + item.quantity;
+        const reserved = isPaid
+          ? (invData.reservedQuantity ?? 0)
+          : Math.max(0, (invData.reservedQuantity ?? 0) - item.quantity);
+        const sold = isPaid
+          ? Math.max(0, (invData.soldQuantity ?? 0) - item.quantity)
+          : (invData.soldQuantity ?? 0);
+        const threshold = invData.lowStockThreshold ?? 10;
+        const newStatus =
+          available <= 0 ? 'OUT_OF_STOCK' : available <= threshold ? 'LOW_STOCK' : 'IN_STOCK';
+
+        transaction.update(invRef, {
+          availableQuantity: available,
+          reservedQuantity: reserved,
+          soldQuantity: sold,
+          status: newStatus,
+          updatedAt: now,
+        });
+      }
+    }
+
+    const historyEntry = {
+      status: 'CANCELLED',
+      paymentStatus: order.paymentStatus,
+      fulfillmentStatus: 'CANCELLED',
+      timestamp: now,
+      actorUserId: callerUid,
+      note: reason || 'Order cancelled by ' + (isStaffCaller ? 'staff' : 'customer'),
+    };
+
+    transaction.update(orderRef, {
+      status: 'CANCELLED',
+      fulfillmentStatus: 'CANCELLED',
+      history: admin.firestore.FieldValue.arrayUnion(historyEntry),
+      updatedAt: now,
+    });
+
+    return { order: { id: snap.id, ...order, status: 'CANCELLED' }, alreadyCancelled: false };
+  });
+
+  if (!result.alreadyCancelled) {
+    await writeAuthoritativeAuditLog(db, {
+      actorUserId: callerUid,
+      actorEmail: context.auth.token.email || '',
+      actorRoles: callerRoles,
+      action: 'ORDER_CANCELLED',
+      resourceType: 'orders',
+      resourceId: orderId,
+      metadata: {
+        reason: reason || 'Order cancelled',
+        cancelledByStaff: isStaffCaller,
+      },
+    });
   }
-
-  const historyEntry = {
-    status: 'CANCELLED',
-    paymentStatus: order.paymentStatus,
-    fulfillmentStatus: 'CANCELLED',
-    timestamp: now,
-    actorUserId: callerUid,
-    note: reason || 'Order cancelled by ' + (isStaffCaller ? 'staff' : 'customer'),
-  };
-
-  batch.update(orderRef, {
-    status: 'CANCELLED',
-    fulfillmentStatus: 'CANCELLED',
-    history: admin.firestore.FieldValue.arrayUnion(historyEntry),
-    updatedAt: now,
-  });
-
-  await batch.commit();
-
-  await writeAuthoritativeAuditLog(db, {
-    actorUserId: callerUid,
-    actorEmail: context.auth.token.email || '',
-    actorRoles: callerRoles,
-    action: 'ORDER_CANCELLED',
-    resourceType: 'orders',
-    resourceId: orderId,
-    metadata: {
-      reason: reason || 'Order cancelled',
-      cancelledByStaff: isStaffCaller,
-    },
-  });
 
   const updatedDoc = await orderRef.get();
   return { success: true, order: { id: updatedDoc.id, ...updatedDoc.data() } };
