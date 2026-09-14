@@ -1,0 +1,495 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // Global Deny-by-Default Catch-All
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // --- REUSABLE AUTHORIZATION HELPERS ---
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isOwner(userId) {
+      return isSignedIn() && request.auth.uid == userId;
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    function isValidId(id) {
+      return id is string && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function hasUserDoc() {
+      return isSignedIn() && exists(/databases/$(database)/documents/users/$(request.auth.uid));
+    }
+
+    function getUserData() {
+      return get(/databases/$(database)/documents/users/$(request.auth.uid)).data;
+    }
+
+    // Permanent governance strictly relies on authoritative Firestore users/{uid}.roles or custom claims.
+    // Email matching alone never authorizes administrative access.
+    function isSuperAdmin() {
+      return (hasUserDoc() && getUserData().roles.hasAny(['SUPER_ADMIN'])) ||
+             (isSignedIn() && request.auth.token.keys().hasAny(['roles']) && request.auth.token.roles.hasAny(['SUPER_ADMIN']));
+    }
+
+    function isAdmin() {
+      return isSuperAdmin() ||
+             (hasUserDoc() && getUserData().roles.hasAny(['ADMIN'])) ||
+             (isSignedIn() && request.auth.token.keys().hasAny(['roles']) && request.auth.token.roles.hasAny(['ADMIN']));
+    }
+
+    function isStaff() {
+      return isSuperAdmin() ||
+             (hasUserDoc() && getUserData().roles.hasAny([
+               'SUPER_ADMIN',
+               'ADMIN',
+               'CONTENT_MANAGER',
+               'COMMUNITY_MANAGER',
+               'SCHOOL_MANAGER',
+               'PRODUCT_MANAGER',
+               'ORDER_MANAGER',
+               'SUPPORT',
+               'ANALYST'
+             ])) ||
+             (isSignedIn() && request.auth.token.keys().hasAny(['roles']) && request.auth.token.roles.hasAny([
+               'SUPER_ADMIN',
+               'ADMIN',
+               'CONTENT_MANAGER',
+               'COMMUNITY_MANAGER',
+               'SCHOOL_MANAGER',
+               'PRODUCT_MANAGER',
+               'ORDER_MANAGER',
+               'SUPPORT',
+               'ANALYST'
+             ]));
+    }
+
+    function hasStaffRole(allowedRoles) {
+      return isSuperAdmin() ||
+             (hasUserDoc() && getUserData().roles.hasAny(allowedRoles)) ||
+             (isSignedIn() && request.auth.token.keys().hasAny(['roles']) && request.auth.token.roles.hasAny(allowedRoles));
+    }
+
+    // Authoritative entitlement check against entitlements collection
+    // Must explicitly verify:
+    // 1. Authenticated user (request.auth != null)
+    // 2. Staff bypass OR:
+    // 3. Authoritative entitlement document exists
+    // 4. Entitlement belongs to request.auth.uid
+    // 5. Entitlement type matches requested entitlement type where schema supports it
+    // 6. Entitlement status is strictly "ACTIVE"
+    function hasActiveEntitlement(type) {
+      let entPath = /databases/$(database)/documents/entitlements/$(request.auth.uid + '_' + type);
+      return isStaff() || (
+        isSignedIn() &&
+        exists(entPath) &&
+        (!('userId' in get(entPath).data) || get(entPath).data.userId == request.auth.uid) &&
+        (!('entitlementType' in get(entPath).data) || get(entPath).data.entitlementType == type) &&
+        (!('type' in get(entPath).data) || get(entPath).data.type == type) &&
+        get(entPath).data.get('status', '') == 'ACTIVE'
+      );
+    }
+
+    function hasCommunityEntitlement() {
+      return hasActiveEntitlement('COMMUNITY_ACCESS');
+    }
+
+    function hasSchoolEntitlement() {
+      return hasActiveEntitlement('SCHOOL_ACCESS');
+    }
+
+    // =========================================================================
+    // USERS COLLECTION
+    // Customer profile self-management vs Protected Administrative RBAC Matrix
+    // =========================================================================
+    match /users/{userId} {
+      allow get: if isOwner(userId) || isStaff();
+      allow list: if isStaff();
+
+      // Customer self-registration is strictly restricted to default CUSTOMER role
+      // and locked status/entitlement defaults, with an exact allowed field whitelist.
+      // Server-authoritative verification flags (emailVerified, phoneVerified) and administrative
+      // attributes are strictly forbidden from client creation.
+      allow create: if (
+        isOwner(userId) &&
+        incoming().uid == request.auth.uid &&
+        incoming().keys().hasOnly([
+          'uid',
+          'email',
+          'displayName',
+          'firstName',
+          'lastName',
+          'dateOfBirth',
+          'phone',
+          'phoneNumber',
+          'country',
+          'wilaya',
+          'city',
+          'address',
+          'preferredLanguage',
+          'locale',
+          'profilePhotoUrl',
+          'photoURL',
+          'termsAcceptedAt',
+          'privacyAcceptedAt',
+          'termsVersion',
+          'privacyVersion',
+          'status',
+          'roles',
+          'createdAt',
+          'updatedAt',
+          'onboardingCompleted',
+          'communityAccess',
+          'schoolAccess',
+          'qualifyingContainerCount',
+          'xp',
+          'level',
+          'profileCompleteness'
+        ]) &&
+        !incoming().keys().hasAny(['emailVerified', 'phoneVerified']) &&
+        incoming().roles == ['CUSTOMER'] &&
+        incoming().status == 'active' &&
+        incoming().communityAccess == false &&
+        incoming().schoolAccess == false &&
+        (!('qualifyingContainerCount' in incoming()) || incoming().qualifyingContainerCount == 0) &&
+        incoming().xp == 0 &&
+        incoming().level == 1 &&
+        incoming().createdAt is string &&
+        incoming().updatedAt is string
+      );
+
+      // Profile updates: Only customer modifying own safe demographic fields.
+      // Roles, status, entitlements, qualifyingContainerCount, and verification flags CANNOT be modified directly by clients.
+      // All administrative role updates MUST go through the authoritative assignUserRoles Cloud Function.
+      allow update: if (
+        isOwner(userId) &&
+        incoming().diff(existing()).affectedKeys().hasOnly([
+          'firstName',
+          'lastName',
+          'displayName',
+          'dateOfBirth',
+          'phone',
+          'phoneNumber',
+          'country',
+          'wilaya',
+          'city',
+          'address',
+          'preferredLanguage',
+          'profilePhotoUrl',
+          'photoURL',
+          'locale',
+          'profileCompleteness',
+          'onboardingCompleted',
+          'updatedAt'
+        ]) &&
+        !incoming().diff(existing()).affectedKeys().hasAny([
+          'roles',
+          'status',
+          'communityAccess',
+          'schoolAccess',
+          'qualifyingContainerCount',
+          'xp',
+          'level',
+          'currentStreak',
+          'longestStreak',
+          'lastActivityDate',
+          'emailVerified',
+          'phoneVerified',
+          'createdAt',
+          'uid',
+          'email'
+        ])
+      );
+
+      // Only Super Admin can hard delete a user document
+      allow delete: if isSuperAdmin();
+    }
+
+    // =========================================================================
+    // ENTITLEMENTS COLLECTION (Authoritative product-derived grants)
+    // Client creation/mutation forbidden. Cloud Functions use Admin SDK.
+    // =========================================================================
+    match /entitlements/{entitlementId} {
+      allow get: if isOwner(existing().userId) || isStaff();
+      allow list: if isStaff() || (isSignedIn() && existing().userId == request.auth.uid);
+      allow create, update, delete: if false;
+    }
+
+    // =========================================================================
+    // ACTIVATIONS COLLECTION (Container serial code activation audit)
+    // Immutable. Created only by authoritative Cloud Function.
+    // =========================================================================
+    match /activations/{activationId} {
+      allow get: if isOwner(existing().userId) || isStaff();
+      allow list: if isStaff() || (isSignedIn() && existing().userId == request.auth.uid);
+      allow create, update, delete: if false;
+    }
+
+    // =========================================================================
+    // MANUFACTURING BATCHES
+    // Read/list restricted to staff roles (SUPER_ADMIN, ADMIN, PRODUCT_MANAGER, etc.).
+    // Direct client mutation is strictly forbidden; batches are managed exclusively via Cloud Functions.
+    // =========================================================================
+    match /batches/{batchId} {
+      allow get, list: if isStaff();
+      allow create, update, delete: if false;
+    }
+
+    // =========================================================================
+    // PRODUCT CODES COLLECTION (Cryptographic Container Serials)
+    // Activation is strictly server-authoritative (activateContainerCode Cloud Function).
+    // Client creation enforces unactivated initial state.
+    // Client updates are strictly limited to administrative metadata (activation fields immutable).
+    // =========================================================================
+    match /productCodes/{codeId} {
+      allow get, list: if isStaff();
+      
+      // Staff can create serialized codes, but codes MUST initialize unactivated
+      allow create: if (
+        hasStaffRole(['SUPER_ADMIN', 'ADMIN', 'PRODUCT_MANAGER']) &&
+        incoming().isActivated == false &&
+        (!('status' in incoming()) || incoming().status == 'UNUSED') &&
+        (!('activatedByUserId' in incoming()) || incoming().activatedByUserId == null) &&
+        (!('activatedAt' in incoming()) || incoming().activatedAt == null)
+      );
+
+      // Direct client updates restricted to safe administrative metadata only.
+      // isActivated, activatedByUserId, activatedAt, code, id CANNOT be modified from the client.
+      allow update: if (
+        hasStaffRole(['SUPER_ADMIN', 'ADMIN', 'PRODUCT_MANAGER']) &&
+        !incoming().diff(existing()).affectedKeys().hasAny(['isActivated', 'activatedByUserId', 'activatedAt', 'code', 'id', 'normalizedCode', 'createdAt', 'createdBy']) &&
+        (!('status' in incoming()) || incoming().status != 'ACTIVATED') &&
+        incoming().diff(existing()).affectedKeys().hasOnly(['batchId', 'productSku', 'metadata', 'expiresAt', 'updatedAt', 'notes', 'status', 'description', 'qrPayload'])
+      );
+
+      // Staff may delete unactivated codes; activated codes cannot be deleted to preserve provenance
+      allow delete: if hasStaffRole(['SUPER_ADMIN', 'ADMIN', 'PRODUCT_MANAGER']) && existing().isActivated == false;
+    }
+
+    // =========================================================================
+    // AUDIT LOGS (Immutable Append-Only Security Trail)
+    // Clients CANNOT write or spoof audit logs.
+    // Authoritative audit logs are created ONLY by trusted server-side Cloud Functions.
+    // =========================================================================
+    match /auditLogs/{logId} {
+      allow get, list: if hasStaffRole(['SUPER_ADMIN', 'ADMIN', 'ANALYST']);
+      allow create, update, delete: if false;
+    }
+
+    // =========================================================================
+    // SCHOOL CATEGORIES, COURSES, MODULES, LESSONS, ENROLLMENTS & PROGRESS
+    // Direct client writes to curriculum catalog are forbidden. Curricula management is strictly
+    // server-authoritative via Cloud Functions.
+    // Modules and lesson content are protected by authoritative School entitlement.
+    // Student progress records are protected against direct client manipulation.
+    // =========================================================================
+    match /schoolCategories/{categoryId} {
+      allow get, list: if (existing().isPublished == true) || isStaff();
+      allow create, update, delete: if false;
+    }
+
+    match /schoolCourses/{courseId} {
+      allow get, list: if (existing().isPublished == true) || isStaff();
+      allow create, update, delete: if false;
+    }
+
+    match /schoolModules/{moduleId} {
+      allow get, list: if ((existing().isPublished == true) && (hasSchoolEntitlement() || isStaff())) || isStaff();
+      allow create, update, delete: if false;
+    }
+
+    match /schoolLessons/{lessonId} {
+      allow get, list: if ((existing().isPublished == true) && (hasSchoolEntitlement() || isStaff())) || isStaff();
+      allow create, update, delete: if false;
+    }
+
+    match /enrollments/{enrollmentId} {
+      allow get: if isOwner(existing().userId) || isStaff();
+      allow list: if isStaff() || (isSignedIn() && existing().userId == request.auth.uid);
+      allow create: if isSignedIn() && incoming().userId == request.auth.uid && (hasSchoolEntitlement() || isStaff());
+      allow update: if isSignedIn() && isOwner(existing().userId) && incoming().userId == existing().userId;
+      allow delete: if isStaff();
+    }
+
+    match /schoolProgress/{progressId} {
+      allow get: if isOwner(existing().userId) || isStaff();
+      allow list: if isStaff() || (isSignedIn() && existing().userId == request.auth.uid);
+      // Direct client writes are forbidden: Authoritative progress and deterministic completion
+      // must be calculated and validated server-side via completeSchoolLesson Cloud Function.
+      allow create, update, delete: if false;
+    }
+
+    // =========================================================================
+    // CERTIFICATES (Private Verified Credentials)
+    // Full records are restricted to the student and staff.
+    // Public verification uses the separate non-enumerable /publicCertificates collection.
+    // =========================================================================
+    match /certificates/{certificateId} {
+      allow get: if isOwner(existing().userId) || isStaff();
+      allow list: if isStaff() || (isSignedIn() && existing().userId == request.auth.uid);
+      allow create, update, delete: if false;
+    }
+
+    // =========================================================================
+    // PUBLIC CERTIFICATES (Non-Enumerable Verification Endpoint)
+    // Keyed by certificateNumber (e.g., ZRN-CERT-...).
+    // Allows direct get of known certificate, strictly forbids collection listing/enumeration.
+    // =========================================================================
+    match /publicCertificates/{certificateNumber} {
+      allow get: if true;
+      allow list: if false;
+      allow create, update, delete: if false;
+    }
+
+    // =========================================================================
+    // COMMUNITY POST LIKES (Deterministic Single-Like Model)
+    // Keyed by {postId}_{userId}. Prevents duplicate likes.
+    // Manipulated atomically via Cloud Function togglePostLike.
+    // =========================================================================
+    match /communityPostLikes/{likeId} {
+      allow get, list: if isSignedIn();
+      allow create, update, delete: if false;
+    }
+
+    // =========================================================================
+    // COMMUNITY ANNOUNCEMENTS
+    // Creation, update, and deletion are strictly server-authoritative
+    // via Cloud Functions with authoritative audit logs.
+    // =========================================================================
+    match /communityAnnouncements/{announcementId} {
+      allow get, list: if isSignedIn();
+      allow create, update, delete: if false;
+    }
+
+    // =========================================================================
+    // COMMUNITY POSTS & MODERATION
+    // Author updates are limited to content only when unlocked.
+    // Moderation (status, lock, pin) is strictly server-authoritative via moderateCommunityPost.
+    // Authors may delete own posts ONLY if unlocked and published (preserves moderation history).
+    // =========================================================================
+    match /communityPosts/{postId} {
+      allow get, list: if isSignedIn() && (existing().status == 'published' || isStaff());
+
+      allow create: if (
+        isSignedIn() &&
+        incoming().authorId == request.auth.uid &&
+        hasCommunityEntitlement() &&
+        incoming().status == 'published' &&
+        incoming().likesCount == 0 &&
+        incoming().commentsCount == 0 &&
+        incoming().isPinned == false &&
+        incoming().isLocked == false &&
+        incoming().title is string &&
+        incoming().title.size() <= 200 &&
+        incoming().body is string &&
+        incoming().body.size() <= 5000
+      );
+
+      // Author editing own text (cannot edit if post was locked by moderator).
+      // Direct client moderation updates removed: moderation must use moderateCommunityPost Cloud Function.
+      allow update: if (
+        isOwner(existing().authorId) &&
+        existing().isLocked == false &&
+        incoming().diff(existing()).affectedKeys().hasOnly(['title', 'body', 'tags', 'updatedAt']) &&
+        incoming().title is string &&
+        incoming().title.size() <= 200 &&
+        incoming().body is string &&
+        incoming().body.size() <= 5000
+      );
+
+      // Deletion policy: Author can delete own post ONLY if unlocked and published.
+      // Staff (SUPER_ADMIN, ADMIN, COMMUNITY_MANAGER) can delete any post.
+      allow delete: if (
+        (isOwner(existing().authorId) && existing().isLocked == false && existing().status == 'published') ||
+        hasStaffRole(['SUPER_ADMIN', 'ADMIN', 'COMMUNITY_MANAGER'])
+      );
+    }
+
+    // =========================================================================
+    // COMMUNITY REPORTS
+    // Created by authenticated users.
+    // Resolution is strictly server-authoritative via resolveCommunityReport Cloud Function.
+    // =========================================================================
+    match /communityReports/{reportId} {
+      allow create: if isSignedIn() && incoming().reporterUserId == request.auth.uid && incoming().status == 'PENDING';
+      allow get, list: if hasStaffRole(['SUPER_ADMIN', 'ADMIN', 'COMMUNITY_MANAGER']);
+      allow update, delete: if false; // Must be resolved via resolveCommunityReport Cloud Function
+    }
+
+    // =========================================================================
+    // CMS CONTENT
+    // All updates route through updateCmsSection Cloud Function.
+    // Direct client mutation is forbidden.
+    // =========================================================================
+    match /cmsContent/{sectionKey} {
+      allow get, list: if true;
+      allow create, update, delete: if false;
+    }
+
+    // =========================================================================
+    // GAMIFICATION: XP LEDGER, MILESTONES, BADGES, STREAKS, REWARDS & REDEMPTIONS
+    // All write operations are strictly server-authoritative via Cloud Functions.
+    // Customers cannot directly modify XP, levels, milestones, badges, streaks, or redemptions.
+    // =========================================================================
+    match /xpTransactions/{txId} {
+      allow get: if isSignedIn() && (existing().userId == request.auth.uid || isStaff());
+      allow list: if isSignedIn();
+      allow write: if false; // Cloud Functions only
+    }
+
+    match /userMilestones/{milestoneId} {
+      allow get: if isSignedIn() && (existing().userId == request.auth.uid || isStaff());
+      allow list: if isSignedIn();
+      allow write: if false; // Cloud Functions only
+    }
+
+    match /userBadges/{badgeId} {
+      allow get: if isSignedIn() && (existing().userId == request.auth.uid || isStaff());
+      allow list: if isSignedIn();
+      allow write: if false; // Cloud Functions only
+    }
+
+    match /userGamification/{userId} {
+      allow get: if isOwner(userId) || isStaff();
+      allow list: if isStaff();
+      allow write: if false; // Cloud Functions only
+    }
+
+    match /rewards/{rewardId} {
+      allow get, list: if isSignedIn();
+      allow write: if hasStaffRole(['SUPER_ADMIN', 'ADMIN']);
+    }
+
+    match /rewardRedemptions/{redemptionId} {
+      allow get: if isSignedIn() && (existing().userId == request.auth.uid || isStaff());
+      allow list: if isSignedIn();
+      allow write: if false; // redeemReward Cloud Function only
+    }
+
+    match /journeyLogs/{logId} {
+      allow get: if isSignedIn() && (existing().userId == request.auth.uid || isStaff());
+      allow list: if isSignedIn();
+      allow write: if false; // completeJourneyDay Cloud Function only
+    }
+
+    // =========================================================================
+    // SYSTEM GOVERNANCE METADATA
+    // Internal metadata docs (e.g. _system/governance). Client access is denied.
+    // =========================================================================
+    match /_system/{docId} {
+      allow read, write: if false;
+    }
+  }
+}

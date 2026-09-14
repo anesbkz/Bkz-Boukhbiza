@@ -1,0 +1,487 @@
+{
+  "entities": {
+    "UserProfile": {
+      "title": "UserProfile",
+      "description": "User profile with role-based access control and entitlement status",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string" },
+        "email": { "type": "string", "format": "email" },
+        "firstName": { "type": "string", "maxLength": 100 },
+        "lastName": { "type": "string", "maxLength": 100 },
+        "displayName": { "type": "string", "maxLength": 100 },
+        "dateOfBirth": { "type": "string" },
+        "phone": { "type": "string", "maxLength": 30 },
+        "phoneNumber": { "type": "string", "maxLength": 30 },
+        "country": { "type": "string", "maxLength": 100 },
+        "wilaya": { "type": "string", "maxLength": 100 },
+        "city": { "type": "string", "maxLength": 100 },
+        "address": { "type": "string", "maxLength": 255 },
+        "preferredLanguage": { "type": "string", "enum": ["ar", "fr", "en"] },
+        "profilePhotoUrl": { "type": "string" },
+        "photoURL": { "type": "string" },
+        "emailVerified": { "type": "boolean" },
+        "phoneVerified": { "type": "boolean" },
+        "profileCompleteness": { "type": "number" },
+        "termsAccepted": { "type": "boolean" },
+        "termsAcceptedAt": { "type": "string" },
+        "privacyAccepted": { "type": "boolean" },
+        "privacyAcceptedAt": { "type": "string" },
+        "status": { "type": "string", "enum": ["active", "pending", "suspended", "archived"] },
+        "roles": { "type": "array" },
+        "createdAt": { "type": "string" },
+        "updatedAt": { "type": "string" },
+        "onboardingCompleted": { "type": "boolean" },
+        "communityAccess": { "type": "boolean" },
+        "schoolAccess": { "type": "boolean" },
+        "xp": { "type": "number" },
+        "level": { "type": "number" },
+        "locale": { "type": "string", "maxLength": 10 }
+      },
+      "required": ["uid", "email", "status", "roles", "createdAt", "updatedAt"]
+    },
+    "Entitlement": {
+      "title": "Entitlement",
+      "description": "Cryptographically verifiable entitlement granting access to School or Community",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "userId": { "type": "string" },
+        "entitlementType": { "type": "string", "enum": ["COMMUNITY_ACCESS", "SCHOOL_ACCESS", "PHASE_TRAJECTORY"] },
+        "sourceProductSku": { "type": "string" },
+        "sourceCode": { "type": "string" },
+        "status": { "type": "string", "enum": ["ACTIVE", "REVOKED", "EXPIRED"] },
+        "grantedAt": { "type": "string" },
+        "expiresAt": { "type": "string" },
+        "grantedBy": { "type": "string" }
+      },
+      "required": ["id", "userId", "entitlementType", "status", "grantedAt"]
+    },
+    "Activation": {
+      "title": "Activation",
+      "description": "Product batch container activation record",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "code": { "type": "string" },
+        "userId": { "type": "string" },
+        "productSku": { "type": "string" },
+        "activatedAt": { "type": "string" },
+        "entitlementsGranted": { "type": "array" }
+      },
+      "required": ["id", "code", "userId", "productSku", "activatedAt"]
+    },
+    "ProductCode": {
+      "title": "ProductCode",
+      "description": "Cryptographic container serial verification code",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "code": { "type": "string" },
+        "batchId": { "type": "string" },
+        "productSku": { "type": "string" },
+        "isActivated": { "type": "boolean" },
+        "activatedByUserId": { "type": "string" },
+        "activatedAt": { "type": "string" },
+        "grantsSchoolAccess": { "type": "boolean" },
+        "grantsCommunityAccess": { "type": "boolean" },
+        "createdAt": { "type": "string" }
+      },
+      "required": ["id", "code", "productSku", "isActivated", "createdAt"]
+    },
+    "AuditLog": {
+      "title": "AuditLog",
+      "description": "Immutable append-only governance and action trail",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "actorUserId": { "type": "string" },
+        "actorEmail": { "type": "string" },
+        "actorRoles": { "type": "array" },
+        "action": { "type": "string" },
+        "resourceType": { "type": "string" },
+        "resourceId": { "type": "string" },
+        "timestamp": { "type": "string" },
+        "metadata": { "type": "object" }
+      },
+      "required": ["actorUserId", "action", "resourceType", "resourceId", "timestamp"]
+    },
+    "SchoolCategory": {
+      "title": "SchoolCategory",
+      "description": "Dynamic curriculum domain category",
+      "type": "object",
+      "properties": {
+        "slug": { "type": "string" },
+        "title": { "type": "object" },
+        "description": { "type": "object" },
+        "iconName": { "type": "string" },
+        "displayOrder": { "type": "number" },
+        "isPublished": { "type": "boolean" },
+        "createdAt": { "type": "string" },
+        "updatedAt": { "type": "string" }
+      },
+      "required": ["slug", "title", "description", "displayOrder", "isPublished"]
+    },
+    "SchoolCourse": {
+      "title": "SchoolCourse",
+      "description": "Curriculum course module",
+      "type": "object",
+      "properties": {
+        "categoryId": { "type": "string" },
+        "slug": { "type": "string" },
+        "title": { "type": "object" },
+        "description": { "type": "object" },
+        "difficulty": { "type": "string", "enum": ["FOUNDATIONAL", "INTERMEDIATE", "ADVANCED"] },
+        "estimatedHours": { "type": "number" },
+        "isPublished": { "type": "boolean" },
+        "displayOrder": { "type": "number" },
+        "createdAt": { "type": "string" },
+        "updatedAt": { "type": "string" }
+      },
+      "required": ["categoryId", "slug", "title", "difficulty", "isPublished"]
+    },
+    "CommunityPost": {
+      "title": "CommunityPost",
+      "description": "Verified member discussion thread",
+      "type": "object",
+      "properties": {
+        "authorId": { "type": "string" },
+        "authorName": { "type": "string" },
+        "authorRoles": { "type": "array" },
+        "title": { "type": "string", "maxLength": 200 },
+        "body": { "type": "string", "maxLength": 5000 },
+        "tags": { "type": "array" },
+        "likesCount": { "type": "number" },
+        "commentsCount": { "type": "number" },
+        "isLocked": { "type": "boolean" },
+        "isPinned": { "type": "boolean" },
+        "status": { "type": "string", "enum": ["published", "hidden", "flagged"] },
+        "createdAt": { "type": "string" },
+        "updatedAt": { "type": "string" }
+      },
+      "required": ["authorId", "authorName", "title", "body", "status", "createdAt"]
+    },
+    "CommunityAnnouncement": {
+      "title": "CommunityAnnouncement",
+      "description": "Official clinical broadcast notice",
+      "type": "object",
+      "properties": {
+        "title": { "type": "object" },
+        "content": { "type": "object" },
+        "isPinned": { "type": "boolean" },
+        "priority": { "type": "string", "enum": ["NORMAL", "HIGH", "URGENT"] },
+        "authorId": { "type": "string" },
+        "authorName": { "type": "string" },
+        "createdAt": { "type": "string" },
+        "updatedAt": { "type": "string" }
+      },
+      "required": ["title", "content", "priority", "authorId", "createdAt"]
+    },
+    "CommunityReport": {
+      "title": "CommunityReport",
+      "description": "Member moderation flag report",
+      "type": "object",
+      "properties": {
+        "reporterUserId": { "type": "string" },
+        "targetType": { "type": "string", "enum": ["POST", "COMMENT", "USER"] },
+        "targetId": { "type": "string" },
+        "reason": { "type": "string", "maxLength": 500 },
+        "status": { "type": "string", "enum": ["PENDING", "RESOLVED", "DISMISSED"] },
+        "createdAt": { "type": "string" }
+      },
+      "required": ["reporterUserId", "targetType", "targetId", "reason", "status", "createdAt"]
+    },
+    "CmsContent": {
+      "title": "CmsContent",
+      "description": "Dynamic multilingual copy and banners",
+      "type": "object",
+      "properties": {
+        "sectionKey": { "type": "string" },
+        "data": { "type": "object" },
+        "updatedAt": { "type": "string" },
+        "updatedBy": { "type": "string" }
+      },
+      "required": ["sectionKey", "data", "updatedAt", "updatedBy"]
+    },
+    "Certificate": {
+      "title": "Certificate",
+      "description": "Full student credential record with private course completion details",
+      "type": "object",
+      "properties": {
+        "certificateNumber": { "type": "string" },
+        "userId": { "type": "string" },
+        "recipientName": { "type": "string" },
+        "courseId": { "type": "string" },
+        "courseTitle": { "type": "string" },
+        "issuedAt": { "type": "string" },
+        "issuedByUid": { "type": "string" },
+        "status": { "type": "string", "enum": ["VALID", "REVOKED"] }
+      },
+      "required": ["certificateNumber", "userId", "recipientName", "courseId", "courseTitle", "issuedAt", "status"]
+    },
+    "PublicCertificate": {
+      "title": "PublicCertificate",
+      "description": "Minimal public verification credential record with zero PII and non-enumerable direct get",
+      "type": "object",
+      "properties": {
+        "certificateNumber": { "type": "string" },
+        "recipientName": { "type": "string" },
+        "courseTitle": { "type": "string" },
+        "issuedAt": { "type": "string" },
+        "status": { "type": "string", "enum": ["VALID", "REVOKED"] }
+      },
+      "required": ["certificateNumber", "recipientName", "courseTitle", "issuedAt", "status"]
+    },
+    "CommunityPostLike": {
+      "title": "CommunityPostLike",
+      "description": "Deterministic single-like record per user per post preventing duplicate likes",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "postId": { "type": "string" },
+        "userId": { "type": "string" },
+        "createdAt": { "type": "string" }
+      },
+      "required": ["id", "postId", "userId", "createdAt"]
+    },
+    "SchoolModule": {
+      "title": "SchoolModule",
+      "description": "Curriculum module grouping sequential lessons within a course",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "courseId": { "type": "string" },
+        "title": { "type": "object" },
+        "description": { "type": "object" },
+        "displayOrder": { "type": "number" },
+        "isPublished": { "type": "boolean" },
+        "createdAt": { "type": "string" }
+      },
+      "required": ["courseId", "title", "displayOrder", "isPublished"]
+    },
+    "SchoolLesson": {
+      "title": "SchoolLesson",
+      "description": "Educational lesson containing markdown content and instructional metadata",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "courseId": { "type": "string" },
+        "moduleId": { "type": "string" },
+        "title": { "type": "object" },
+        "contentMarkdown": { "type": "object" },
+        "durationMinutes": { "type": "number" },
+        "displayOrder": { "type": "number" },
+        "isPublished": { "type": "boolean" },
+        "createdAt": { "type": "string" }
+      },
+      "required": ["courseId", "moduleId", "title", "contentMarkdown", "durationMinutes", "displayOrder", "isPublished"]
+    },
+    "SchoolProgress": {
+      "title": "SchoolProgress",
+      "description": "Authoritative student lesson completion and deterministic course progress record",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "userId": { "type": "string" },
+        "courseId": { "type": "string" },
+        "completedLessonIds": { "type": "array" },
+        "completedCount": { "type": "number" },
+        "totalLessonsCount": { "type": "number" },
+        "progressPercent": { "type": "number" },
+        "isCompleted": { "type": "boolean" },
+        "completedAt": { "type": "string" },
+        "lastAccessedLessonId": { "type": "string" },
+        "lastUpdated": { "type": "string" }
+      },
+      "required": ["userId", "courseId", "completedLessonIds", "completedCount", "totalLessonsCount", "progressPercent", "isCompleted", "lastUpdated"]
+    },
+    "Enrollment": {
+      "title": "Enrollment",
+      "description": "Student course enrollment and access record",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "userId": { "type": "string" },
+        "courseId": { "type": "string" },
+        "enrolledAt": { "type": "string" },
+        "status": { "type": "string", "enum": ["ACTIVE", "COMPLETED"] },
+        "lastAccessedLessonId": { "type": "string" },
+        "lastAccessedAt": { "type": "string" },
+        "completedAt": { "type": "string" }
+      },
+      "required": ["userId", "courseId", "enrolledAt", "status"]
+    },
+    "XpTransaction": {
+      "title": "XpTransaction",
+      "description": "Immutable ledger record of earned, redeemed, or adjusted XP",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "userId": { "type": "string" },
+        "amount": { "type": "number" },
+        "type": { "type": "string", "enum": ["EARNED", "REDEEMED", "ADJUSTMENT"] },
+        "source": { "type": "string" },
+        "sourceId": { "type": "string" },
+        "createdAt": { "type": "string" },
+        "metadata": { "type": "object" }
+      },
+      "required": ["id", "userId", "amount", "type", "source", "createdAt"]
+    },
+    "UserMilestone": {
+      "title": "UserMilestone",
+      "description": "Major platform achievement reached by user",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "userId": { "type": "string" },
+        "milestoneKey": { "type": "string" },
+        "title": { "type": "string" },
+        "description": { "type": "string" },
+        "achievedAt": { "type": "string" }
+      },
+      "required": ["id", "userId", "milestoneKey", "title", "achievedAt"]
+    },
+    "UserBadge": {
+      "title": "UserBadge",
+      "description": "Earned credential badge symbolizing verifiable platform accomplishments",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "userId": { "type": "string" },
+        "badgeKey": { "type": "string" },
+        "name": { "type": "string" },
+        "description": { "type": "string" },
+        "icon": { "type": "string" },
+        "requirement": { "type": "string" },
+        "awardedAt": { "type": "string" }
+      },
+      "required": ["id", "userId", "badgeKey", "name", "awardedAt"]
+    },
+    "Reward": {
+      "title": "Reward",
+      "description": "Available catalog reward redeemable via authoritative XP deduction",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "title": { "type": "string" },
+        "description": { "type": "string" },
+        "type": { "type": "string", "enum": ["DIGITAL", "PLATFORM_BENEFIT", "BADGE", "EDUCATIONAL"] },
+        "xpCost": { "type": "number" },
+        "isActive": { "type": "boolean" },
+        "stock": { "type": "number" },
+        "createdAt": { "type": "string" },
+        "updatedAt": { "type": "string" }
+      },
+      "required": ["id", "title", "type", "xpCost", "isActive"]
+    },
+    "RewardRedemption": {
+      "title": "RewardRedemption",
+      "description": "Authoritative redemption audit record for claimed reward",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "userId": { "type": "string" },
+        "rewardId": { "type": "string" },
+        "rewardTitle": { "type": "string" },
+        "xpCost": { "type": "number" },
+        "status": { "type": "string", "enum": ["COMPLETED", "PENDING", "REJECTED"] },
+        "createdAt": { "type": "string" }
+      },
+      "required": ["id", "userId", "rewardId", "rewardTitle", "xpCost", "status", "createdAt"]
+    }
+  },
+  "firestore": {
+    "/users/{userId}": {
+      "schema": { "$ref": "#/entities/UserProfile" },
+      "description": "User profiles with immutable identity and protected RBAC role matrix"
+    },
+    "/entitlements/{entitlementId}": {
+      "schema": { "$ref": "#/entities/Entitlement" },
+      "description": "Authoritative entitlement grants derived from verified product codes"
+    },
+    "/activations/{activationId}": {
+      "schema": { "$ref": "#/entities/Activation" },
+      "description": "Audit record of product code activations by users"
+    },
+    "/productCodes/{codeId}": {
+      "schema": { "$ref": "#/entities/ProductCode" },
+      "description": "Cryptographic container serial verification registry"
+    },
+    "/auditLogs/{logId}": {
+      "schema": { "$ref": "#/entities/AuditLog" },
+      "description": "Immutable append-only audit trail for administrative operations"
+    },
+    "/certificates/{certificateId}": {
+      "schema": { "$ref": "#/entities/Certificate" },
+      "description": "Student completion certificates protected from public listing"
+    },
+    "/publicCertificates/{certificateNumber}": {
+      "schema": { "$ref": "#/entities/PublicCertificate" },
+      "description": "Non-enumerable public verification endpoint for known certificate numbers"
+    },
+    "/communityPostLikes/{likeId}": {
+      "schema": { "$ref": "#/entities/CommunityPostLike" },
+      "description": "Atomic like records keyed by postId_userId"
+    },
+    "/schoolCategories/{categoryId}": {
+      "schema": { "$ref": "#/entities/SchoolCategory" },
+      "description": "Curriculum domain categories for ZIRON School"
+    },
+    "/schoolCourses/{courseId}": {
+      "schema": { "$ref": "#/entities/SchoolCourse" },
+      "description": "Structured curriculum courses"
+    },
+    "/schoolModules/{moduleId}": {
+      "schema": { "$ref": "#/entities/SchoolModule" },
+      "description": "Curriculum course modules"
+    },
+    "/schoolLessons/{lessonId}": {
+      "schema": { "$ref": "#/entities/SchoolLesson" },
+      "description": "Instructional lessons within course modules"
+    },
+    "/schoolProgress/{progressId}": {
+      "schema": { "$ref": "#/entities/SchoolProgress" },
+      "description": "Student lesson completion and deterministic course progress"
+    },
+    "/enrollments/{enrollmentId}": {
+      "schema": { "$ref": "#/entities/Enrollment" },
+      "description": "Student course enrollment and access registry"
+    },
+    "/communityPosts/{postId}": {
+      "schema": { "$ref": "#/entities/CommunityPost" },
+      "description": "Member discussion threads protected by community entitlement"
+    },
+    "/communityAnnouncements/{announcementId}": {
+      "schema": { "$ref": "#/entities/CommunityAnnouncement" },
+      "description": "Official broadcast notices published by staff"
+    },
+    "/communityReports/{reportId}": {
+      "schema": { "$ref": "#/entities/CommunityReport" },
+      "description": "Moderation flags submitted by members"
+    },
+    "/cmsContent/{sectionKey}": {
+      "schema": { "$ref": "#/entities/CmsContent" },
+      "description": "Live CMS content manageable without application redeployment"
+    },
+    "/xpTransactions/{transactionId}": {
+      "schema": { "$ref": "#/entities/XpTransaction" },
+      "description": "Immutable append-only XP event ledger"
+    },
+    "/userMilestones/{milestoneId}": {
+      "schema": { "$ref": "#/entities/UserMilestone" },
+      "description": "Deterministic user achievement milestones"
+    },
+    "/userBadges/{badgeId}": {
+      "schema": { "$ref": "#/entities/UserBadge" },
+      "description": "Earned platform badges and credentials"
+    },
+    "/rewards/{rewardId}": {
+      "schema": { "$ref": "#/entities/Reward" },
+      "description": "Available rewards marketplace catalogue"
+    },
+    "/rewardRedemptions/{redemptionId}": {
+      "schema": { "$ref": "#/entities/RewardRedemption" },
+      "description": "Authoritative user reward redemptions"
+    }
+  }
+}

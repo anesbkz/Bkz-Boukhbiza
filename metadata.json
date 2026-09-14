@@ -1,0 +1,6 @@
+{
+  "name": "ZIRON | VIREXON BIOSCIENCES",
+  "description": "Phase-based nutritional wellness platform and structured 90-day protocol by VIREXON BIOSCIENCES.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
