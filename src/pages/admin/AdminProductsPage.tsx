@@ -30,10 +30,13 @@ import {
   CheckCircle2,
   Ban,
   Archive,
+  ShoppingCart,
 } from 'lucide-react';
+import { CommerceCatalogTab } from '@/components/admin/commerce/CommerceCatalogTab';
 
 export const AdminProductsPage: React.FC = () => {
   const { navigate, dir } = useI18n();
+  const [activeTab, setActiveTab] = useState<'MANUFACTURING' | 'COMMERCE'>('MANUFACTURING');
 
   const [batches, setBatches] = useState<ProductBatch[]>([]);
   const [loading, setLoading] = useState(true);
@@ -156,6 +159,38 @@ export const AdminProductsPage: React.FC = () => {
 
   return (
     <div className="space-y-6 text-start" dir={dir}>
+      {/* Section Switcher Tabs */}
+      <div className="flex border-b border-gray-200 gap-6">
+        <button
+          type="button"
+          onClick={() => setActiveTab('MANUFACTURING')}
+          className={`pb-3 font-semibold text-sm flex items-center gap-2 border-b-2 transition-colors ${
+            activeTab === 'MANUFACTURING'
+              ? 'border-[#0B2346] text-[#0B2346]'
+              : 'border-transparent text-gray-500 hover:text-gray-800'
+          }`}
+        >
+          <Factory className="w-4 h-4" />
+          Manufacturing Batches & Codes
+        </button>
+        <button
+          type="button"
+          onClick={() => setActiveTab('COMMERCE')}
+          className={`pb-3 font-semibold text-sm flex items-center gap-2 border-b-2 transition-colors ${
+            activeTab === 'COMMERCE'
+              ? 'border-emerald-600 text-emerald-600'
+              : 'border-transparent text-gray-500 hover:text-gray-800'
+          }`}
+        >
+          <ShoppingCart className="w-4 h-4" />
+          Commerce Catalog & Inventory
+        </button>
+      </div>
+
+      {activeTab === 'COMMERCE' ? (
+        <CommerceCatalogTab />
+      ) : (
+        <>
       {/* Header Section */}
       <div className="bg-white border border-[#E2E8F0] p-6 flex flex-col md:flex-row md:items-center justify-between gap-4">
         <div>
@@ -571,6 +606,8 @@ export const AdminProductsPage: React.FC = () => {
             setStatusTargetBatch({ batch: b, status });
           }}
         />
+      )}
+        </>
       )}
     </div>
   );

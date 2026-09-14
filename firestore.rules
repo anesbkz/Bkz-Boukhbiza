@@ -248,6 +248,49 @@ service cloud.firestore {
     }
 
     // =========================================================================
+    // PRODUCTS COLLECTION (Commerce Product Catalog)
+    // Public read for ACTIVE products. Staff can view all and manage.
+    // Customers cannot directly modify product details or status.
+    // =========================================================================
+    match /products/{productId} {
+      allow get, list: if isStaff() || (existing().status == 'ACTIVE');
+      allow create, update, delete: if hasStaffRole(['SUPER_ADMIN', 'ADMIN', 'PRODUCT_MANAGER']);
+    }
+
+    // =========================================================================
+    // PRODUCT VARIANTS COLLECTION
+    // Public read for ACTIVE variants. Staff can view all and manage.
+    // Customers cannot directly modify variant details, prices, or status.
+    // =========================================================================
+    match /productVariants/{variantId} {
+      allow get, list: if isStaff() || (existing().status == 'ACTIVE');
+      allow create, update, delete: if hasStaffRole(['SUPER_ADMIN', 'ADMIN', 'PRODUCT_MANAGER']);
+    }
+
+    // =========================================================================
+    // INVENTORY COLLECTION
+    // Staff read/list. Direct client mutation is forbidden.
+    // Inventory is checked, reserved, and deducted server-side via Cloud Functions.
+    // =========================================================================
+    match /inventory/{inventoryId} {
+      allow get, list: if isStaff();
+      allow create, update, delete: if false;
+    }
+
+    // =========================================================================
+    // ORDERS COLLECTION
+    // Customer can get/list ONLY their own orders (existing().userId == request.auth.uid).
+    // Staff can get/list all orders.
+    // Direct client create, update, delete is disallowed; all order operations
+    // (creation, status updates, cancellations) are server-authoritative via Cloud Functions.
+    // =========================================================================
+    match /orders/{orderId} {
+      allow get: if isOwner(existing().userId) || isStaff();
+      allow list: if isStaff() || (isSignedIn() && existing().userId == request.auth.uid);
+      allow create, update, delete: if false;
+    }
+
+    // =========================================================================
     // PRODUCT CODES COLLECTION (Cryptographic Container Serials)
     // Activation is strictly server-authoritative (activateContainerCode Cloud Function).
     // Client creation enforces unactivated initial state.

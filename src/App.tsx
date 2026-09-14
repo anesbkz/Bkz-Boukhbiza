@@ -45,6 +45,7 @@ import { AdminRolesPage } from '@/pages/admin/AdminRolesPage';
 import { AdminAuditPage } from '@/pages/admin/AdminAuditPage';
 import { AdminCmsPage } from '@/pages/admin/AdminCmsPage';
 import { AdminProductsPage } from '@/pages/admin/AdminProductsPage';
+import { AdminOrdersPage } from '@/pages/admin/AdminOrdersPage';
 import { AdminCodesPage } from '@/pages/admin/AdminCodesPage';
 import { AdminCertificatesPage } from '@/pages/admin/AdminCertificatesPage';
 import { AdminPlaceholderPage } from '@/pages/admin/AdminPlaceholderPage';
@@ -133,13 +134,7 @@ function RouterOutlet() {
       case 'admin/orders':
         adminContent = (
           <AdminRouteGuard requiredPermission="MANAGE_ORDERS">
-            <AdminPlaceholderPage
-              title="Supply & Fulfillment Orders"
-              subtitle="Review customer orders, Algerian DZD transactions, and logistics status."
-              code="FULFILL_01"
-              status="PLANNED"
-              milestoneDescription="Order queue data models defined. Algerian DZD payment reconciliation and logistics queue interface planned for upcoming milestone."
-            />
+            <AdminOrdersPage />
           </AdminRouteGuard>
         );
         break;

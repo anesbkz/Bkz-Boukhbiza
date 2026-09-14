@@ -38,5 +38,5 @@ try {
   throw error;
 }
 
-export { app, auth, db, functionsInstance };
+export { app, auth, db, functionsInstance, functionsInstance as functions };
 

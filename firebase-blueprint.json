@@ -388,6 +388,81 @@
         "createdAt": { "type": "string" }
       },
       "required": ["id", "userId", "rewardId", "rewardTitle", "xpCost", "status", "createdAt"]
+    },
+    "Product": {
+      "title": "Product",
+      "description": "Authoritative product definition and catalog metadata",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "sku": { "type": "string" },
+        "slug": { "type": "string" },
+        "brand": { "type": "string" },
+        "status": { "type": "string", "enum": ["DRAFT", "ACTIVE", "OUT_OF_STOCK", "ARCHIVED"] },
+        "productType": { "type": "string", "enum": ["PHYSICAL", "BUNDLE", "DIGITAL"] },
+        "availableVariants": { "type": "array" },
+        "createdAt": { "type": "string" },
+        "updatedAt": { "type": "string" }
+      },
+      "required": ["id", "sku", "status", "createdAt", "updatedAt"]
+    },
+    "ProductVariant": {
+      "title": "ProductVariant",
+      "description": "Product SKU variant with authoritative pricing and inventory linkage",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "productId": { "type": "string" },
+        "sku": { "type": "string" },
+        "quantity": { "type": "number" },
+        "unit": { "type": "string" },
+        "price": { "type": "number" },
+        "currency": { "type": "string" },
+        "status": { "type": "string", "enum": ["ACTIVE", "INACTIVE", "ARCHIVED"] },
+        "inventoryId": { "type": "string" },
+        "createdAt": { "type": "string" },
+        "updatedAt": { "type": "string" }
+      },
+      "required": ["id", "productId", "sku", "price", "currency", "status", "createdAt", "updatedAt"]
+    },
+    "InventoryItem": {
+      "title": "InventoryItem",
+      "description": "Authoritative warehouse stock levels and thresholds",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "variantId": { "type": "string" },
+        "productId": { "type": "string" },
+        "sku": { "type": "string" },
+        "availableQuantity": { "type": "number" },
+        "reservedQuantity": { "type": "number" },
+        "soldQuantity": { "type": "number" },
+        "lowStockThreshold": { "type": "number" },
+        "status": { "type": "string", "enum": ["IN_STOCK", "LOW_STOCK", "OUT_OF_STOCK"] },
+        "updatedAt": { "type": "string" }
+      },
+      "required": ["id", "variantId", "availableQuantity", "reservedQuantity", "soldQuantity", "status", "updatedAt"]
+    },
+    "Order": {
+      "title": "Order",
+      "description": "Authoritative customer commerce order with server-calculated totals",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "orderNumber": { "type": "string" },
+        "userId": { "type": "string" },
+        "items": { "type": "array" },
+        "subtotal": { "type": "number" },
+        "shippingCost": { "type": "number" },
+        "total": { "type": "number" },
+        "currency": { "type": "string" },
+        "status": { "type": "string", "enum": ["PENDING", "CONFIRMED", "PROCESSING", "SHIPPED", "DELIVERED", "CANCELLED"] },
+        "paymentStatus": { "type": "string", "enum": ["UNPAID", "PENDING", "PAID", "FAILED", "REFUNDED"] },
+        "fulfillmentStatus": { "type": "string", "enum": ["UNFULFILLED", "PROCESSING", "SHIPPED", "DELIVERED", "CANCELLED"] },
+        "createdAt": { "type": "string" },
+        "updatedAt": { "type": "string" }
+      },
+      "required": ["id", "orderNumber", "userId", "items", "subtotal", "total", "currency", "status", "paymentStatus", "fulfillmentStatus", "createdAt", "updatedAt"]
     }
   },
   "firestore": {
@@ -482,6 +557,22 @@
     "/rewardRedemptions/{redemptionId}": {
       "schema": { "$ref": "#/entities/RewardRedemption" },
       "description": "Authoritative user reward redemptions"
+    },
+    "/products/{productId}": {
+      "schema": { "$ref": "#/entities/Product" },
+      "description": "Authoritative product definition catalog"
+    },
+    "/productVariants/{variantId}": {
+      "schema": { "$ref": "#/entities/ProductVariant" },
+      "description": "Product SKU variants with pricing and inventory linkage"
+    },
+    "/inventory/{inventoryId}": {
+      "schema": { "$ref": "#/entities/InventoryItem" },
+      "description": "Authoritative warehouse stock levels and reserves"
+    },
+    "/orders/{orderId}": {
+      "schema": { "$ref": "#/entities/Order" },
+      "description": "Authoritative customer commerce orders"
     }
   }
 }

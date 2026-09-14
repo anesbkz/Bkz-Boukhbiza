@@ -42,11 +42,14 @@ export const CANONICAL_APP_ROLES = [
   'SUPER_ADMIN',
   'ADMIN',
   'PRODUCT_MANAGER',
+  'ORDER_MANAGER',
   'SCHOOL_MANAGER',
   'COMMUNITY_MANAGER',
   'CONTENT_MANAGER',
   'SECURITY_OFFICER',
   'AUDITOR',
+  'SUPPORT',
+  'ANALYST',
   'CUSTOMER',
   'BETA_TESTER',
   'RESEARCH_PARTICIPANT',
@@ -4799,6 +4802,1036 @@ export const seedInitialRewards = functions.https.onCall(async (request) => {
   await batch.commit();
 
   return { success: true, count: INITIAL_REWARDS.length };
+});
+
+/* ==========================================================================
+   COMMERCE & ORDER FOUNDATION (PHASE 10)
+   ========================================================================== */
+
+async function assertCanManageCommerce(
+  context: functions.https.CallableContext
+): Promise<{ callerUid: string; callerEmail: string; callerRoles: string[] }> {
+  if (!context.auth) {
+    throw new functions.https.HttpsError('unauthenticated', 'Caller must be authenticated.');
+  }
+
+  const callerUid = context.auth.uid;
+  const callerSnap = await db.collection('users').doc(callerUid).get();
+  if (!callerSnap.exists) {
+    throw new functions.https.HttpsError('not-found', 'Caller profile not found.');
+  }
+  const callerData = callerSnap.data()!;
+  if (callerData.status !== 'active') {
+    throw new functions.https.HttpsError('permission-denied', 'Caller account is not active.');
+  }
+
+  const callerRoles: string[] = callerData.roles || [];
+  const callerEmail = context.auth.token.email || '';
+  const isEmailVerified = context.auth.token.email_verified === true;
+  const isCallerSuperAdmin = await checkIsSuperAdmin(callerUid, callerRoles, callerEmail, isEmailVerified);
+
+  const isAuthorized =
+    isCallerSuperAdmin ||
+    callerRoles.includes('ADMIN') ||
+    callerRoles.includes('PRODUCT_MANAGER') ||
+    callerRoles.includes('ORDER_MANAGER');
+
+  if (!isAuthorized) {
+    throw new functions.https.HttpsError(
+      'permission-denied',
+      'Caller lacks authority to manage commerce (requires SUPER_ADMIN, ADMIN, PRODUCT_MANAGER, or ORDER_MANAGER).'
+    );
+  }
+
+  return { callerUid, callerEmail, callerRoles };
+}
+
+async function assertCanManageOrders(
+  context: functions.https.CallableContext
+): Promise<{ callerUid: string; callerEmail: string; callerRoles: string[] }> {
+  if (!context.auth) {
+    throw new functions.https.HttpsError('unauthenticated', 'Caller must be authenticated.');
+  }
+
+  const callerUid = context.auth.uid;
+  const callerSnap = await db.collection('users').doc(callerUid).get();
+  if (!callerSnap.exists) {
+    throw new functions.https.HttpsError('not-found', 'Caller profile not found.');
+  }
+  const callerData = callerSnap.data()!;
+  if (callerData.status !== 'active') {
+    throw new functions.https.HttpsError('permission-denied', 'Caller account is not active.');
+  }
+
+  const callerRoles: string[] = callerData.roles || [];
+  const callerEmail = context.auth.token.email || '';
+  const isEmailVerified = context.auth.token.email_verified === true;
+  const isCallerSuperAdmin = await checkIsSuperAdmin(callerUid, callerRoles, callerEmail, isEmailVerified);
+
+  const isAuthorized =
+    isCallerSuperAdmin ||
+    callerRoles.includes('ADMIN') ||
+    callerRoles.includes('ORDER_MANAGER') ||
+    callerRoles.includes('PRODUCT_MANAGER');
+
+  if (!isAuthorized) {
+    throw new functions.https.HttpsError(
+      'permission-denied',
+      'Caller lacks authority to manage orders (requires SUPER_ADMIN, ADMIN, or ORDER_MANAGER).'
+    );
+  }
+
+  return { callerUid, callerEmail, callerRoles };
+}
+
+const CANONICAL_COMMERCE_CATALOG: Record<string, {
+  sku: string;
+  name: string;
+  capsules: number;
+  priceDzd: number;
+  phase: number | 'BUNDLE';
+}> = {
+  'ZR-PH01-30C': { sku: 'ZR-PH01-30C', name: 'ZIRON Phase 01', capsules: 30, priceDzd: 3500, phase: 1 },
+  'ZR-PH02-30C': { sku: 'ZR-PH02-30C', name: 'ZIRON Phase 02', capsules: 30, priceDzd: 3500, phase: 2 },
+  'ZR-PH03-30C': { sku: 'ZR-PH03-30C', name: 'ZIRON Phase 03', capsules: 30, priceDzd: 3500, phase: 3 },
+  'ZR-BNDL-90C': { sku: 'ZR-BNDL-90C', name: 'ZIRON 90-Day Complete Program Bundle', capsules: 90, priceDzd: 9500, phase: 'BUNDLE' },
+};
+
+/**
+ * Callable Function: Create Product (Admin / Staff)
+ */
+export const createCommerceProduct = functions.https.onCall(async (data, context) => {
+  const { callerUid, callerEmail, callerRoles } = await assertCanManageCommerce(context);
+
+  const {
+    sku,
+    name,
+    slug,
+    description,
+    shortDescription,
+    brand = 'ZIRON / VIREXON BIOSCIENCES',
+    status = 'ACTIVE',
+    productType = 'PHYSICAL',
+    images = [],
+    phaseNumber,
+    capsuleCount,
+  } = data || {};
+
+  if (!sku || typeof sku !== 'string') {
+    throw new functions.https.HttpsError('invalid-argument', 'Valid product SKU is required.');
+  }
+  if (!name || typeof name !== 'object') {
+    throw new functions.https.HttpsError('invalid-argument', 'Multilingual product name is required.');
+  }
+
+  const now = new Date().toISOString();
+  const productId = (slug || sku.toLowerCase().replace(/[^a-z0-9]/g, '-')).trim();
+  const productRef = db.collection('products').doc(productId);
+
+  const productData = {
+    id: productId,
+    sku: sku.trim().toUpperCase(),
+    name,
+    slug: productId,
+    description: description || name,
+    shortDescription: shortDescription || name,
+    brand,
+    status,
+    productType,
+    images: Array.isArray(images) ? images : [],
+    availableVariants: [],
+    phaseNumber: phaseNumber || null,
+    capsuleCount: capsuleCount || 30,
+    createdAt: now,
+    updatedAt: now,
+  };
+
+  await productRef.set(productData, { merge: true });
+
+  await writeAuthoritativeAuditLog(db, {
+    actorUserId: callerUid,
+    actorEmail: callerEmail,
+    actorRoles: callerRoles,
+    action: 'PRODUCT_CREATED',
+    resourceType: 'products',
+    resourceId: productId,
+    metadata: { sku: productData.sku, status },
+  });
+
+  return { success: true, product: productData };
+});
+
+/**
+ * Callable Function: Update Product (Admin / Staff)
+ */
+export const updateCommerceProduct = functions.https.onCall(async (data, context) => {
+  const { callerUid, callerEmail, callerRoles } = await assertCanManageCommerce(context);
+  const { productId, updates } = data || {};
+
+  if (!productId || typeof productId !== 'string') {
+    throw new functions.https.HttpsError('invalid-argument', 'Valid productId is required.');
+  }
+  if (!updates || typeof updates !== 'object') {
+    throw new functions.https.HttpsError('invalid-argument', 'Updates object is required.');
+  }
+
+  const productRef = db.collection('products').doc(productId);
+  const snap = await productRef.get();
+  if (!snap.exists) {
+    throw new functions.https.HttpsError('not-found', `Product ${productId} does not exist.`);
+  }
+
+  const now = new Date().toISOString();
+  const allowedKeys = [
+    'name',
+    'description',
+    'shortDescription',
+    'status',
+    'productType',
+    'images',
+    'availableVariants',
+    'phaseNumber',
+    'capsuleCount',
+    'badgeText',
+    'metadata',
+  ];
+
+  const filteredUpdates: Record<string, any> = { updatedAt: now };
+  for (const key of allowedKeys) {
+    if (key in updates) {
+      filteredUpdates[key] = updates[key];
+    }
+  }
+
+  await productRef.update(filteredUpdates);
+
+  await writeAuthoritativeAuditLog(db, {
+    actorUserId: callerUid,
+    actorEmail: callerEmail,
+    actorRoles: callerRoles,
+    action: 'PRODUCT_UPDATED',
+    resourceType: 'products',
+    resourceId: productId,
+    metadata: { updatedFields: Object.keys(filteredUpdates) },
+  });
+
+  const updatedDoc = await productRef.get();
+  return { success: true, product: { id: updatedDoc.id, ...updatedDoc.data() } };
+});
+
+/**
+ * Callable Function: Create Product Variant (Admin / Staff)
+ */
+export const createCommerceVariant = functions.https.onCall(async (data, context) => {
+  const { callerUid, callerEmail, callerRoles } = await assertCanManageCommerce(context);
+
+  const {
+    productId,
+    sku,
+    name,
+    quantity = 30,
+    unit = 'capsules',
+    price,
+    currency = 'DZD',
+    status = 'ACTIVE',
+    initialStock = 100,
+    lowStockThreshold = 10,
+  } = data || {};
+
+  if (!productId || typeof productId !== 'string') {
+    throw new functions.https.HttpsError('invalid-argument', 'Valid productId is required.');
+  }
+  if (!sku || typeof sku !== 'string') {
+    throw new functions.https.HttpsError('invalid-argument', 'Valid SKU is required.');
+  }
+  if (typeof price !== 'number' || price < 0) {
+    throw new functions.https.HttpsError('invalid-argument', 'Valid numeric price is required.');
+  }
+
+  const now = new Date().toISOString();
+  const variantId = `var-${sku.toLowerCase().replace(/[^a-z0-9]/g, '-')}`;
+  const invId = `inv-${sku.toLowerCase().replace(/[^a-z0-9]/g, '-')}`;
+
+  const variantRef = db.collection('productVariants').doc(variantId);
+  const invRef = db.collection('inventory').doc(invId);
+
+  const variantData = {
+    id: variantId,
+    productId,
+    sku: sku.trim().toUpperCase(),
+    name,
+    quantity,
+    unit,
+    price,
+    currency,
+    status,
+    inventoryId: invId,
+    createdAt: now,
+    updatedAt: now,
+  };
+
+  const invData = {
+    id: invId,
+    variantId,
+    productId,
+    sku: sku.trim().toUpperCase(),
+    availableQuantity: initialStock,
+    reservedQuantity: 0,
+    soldQuantity: 0,
+    lowStockThreshold,
+    status: initialStock <= 0 ? 'OUT_OF_STOCK' : (initialStock <= lowStockThreshold ? 'LOW_STOCK' : 'IN_STOCK'),
+    updatedAt: now,
+  };
+
+  const batch = db.batch();
+  batch.set(variantRef, variantData, { merge: true });
+  batch.set(invRef, invData, { merge: true });
+
+  // Update parent product's availableVariants
+  const productRef = db.collection('products').doc(productId);
+  batch.set(
+    productRef,
+    {
+      availableVariants: admin.firestore.FieldValue.arrayUnion(variantId),
+      updatedAt: now,
+    },
+    { merge: true }
+  );
+
+  await batch.commit();
+
+  await writeAuthoritativeAuditLog(db, {
+    actorUserId: callerUid,
+    actorEmail: callerEmail,
+    actorRoles: callerRoles,
+    action: 'PRODUCT_CREATED',
+    resourceType: 'productVariants',
+    resourceId: variantId,
+    metadata: { sku: variantData.sku, price, initialStock },
+  });
+
+  return { success: true, variant: variantData };
+});
+
+/**
+ * Callable Function: Update Product Variant (Admin / Staff)
+ */
+export const updateCommerceVariant = functions.https.onCall(async (data, context) => {
+  const { callerUid, callerEmail, callerRoles } = await assertCanManageCommerce(context);
+  const { variantId, updates } = data || {};
+
+  if (!variantId || typeof variantId !== 'string') {
+    throw new functions.https.HttpsError('invalid-argument', 'Valid variantId is required.');
+  }
+
+  const variantRef = db.collection('productVariants').doc(variantId);
+  const snap = await variantRef.get();
+  if (!snap.exists) {
+    throw new functions.https.HttpsError('not-found', `Variant ${variantId} not found.`);
+  }
+
+  const currentData = snap.data()!;
+  const now = new Date().toISOString();
+  const allowedKeys = ['name', 'price', 'status', 'quantity', 'unit', 'currency', 'metadata'];
+
+  const filteredUpdates: Record<string, any> = { updatedAt: now };
+  for (const key of allowedKeys) {
+    if (key in updates) {
+      filteredUpdates[key] = updates[key];
+    }
+  }
+
+  await variantRef.update(filteredUpdates);
+
+  const priceChanged = 'price' in updates && updates.price !== currentData.price;
+  await writeAuthoritativeAuditLog(db, {
+    actorUserId: callerUid,
+    actorEmail: callerEmail,
+    actorRoles: callerRoles,
+    action: priceChanged ? 'PRICE_UPDATED' : 'PRODUCT_UPDATED',
+    resourceType: 'productVariants',
+    resourceId: variantId,
+    metadata: {
+      previousPrice: currentData.price,
+      newPrice: updates.price,
+      updatedFields: Object.keys(filteredUpdates),
+    },
+  });
+
+  const updatedDoc = await variantRef.get();
+  return { success: true, variant: { id: updatedDoc.id, ...updatedDoc.data() } };
+});
+
+/**
+ * Callable Function: Adjust Inventory (Admin / Staff)
+ */
+export const updateCommerceInventory = functions.https.onCall(async (data, context) => {
+  const { callerUid, callerEmail, callerRoles } = await assertCanManageCommerce(context);
+  const { variantId, adjustment, reason } = data || {};
+
+  if (!variantId || typeof variantId !== 'string') {
+    throw new functions.https.HttpsError('invalid-argument', 'Valid variantId is required.');
+  }
+  if (typeof adjustment !== 'number') {
+    throw new functions.https.HttpsError('invalid-argument', 'Numeric adjustment value is required.');
+  }
+
+  const invId = `inv-${variantId.replace('var-', '')}`;
+  const invRef = db.collection('inventory').doc(invId);
+
+  const result = await db.runTransaction(async (transaction) => {
+    const snap = await transaction.get(invRef);
+    const now = new Date().toISOString();
+
+    let available = 100;
+    let reserved = 0;
+    let sold = 0;
+    let threshold = 10;
+    let productId = 'ziron-phase-01';
+    let sku = 'ZR-PH01-30C';
+
+    if (snap.exists) {
+      const d = snap.data()!;
+      available = d.availableQuantity ?? 100;
+      reserved = d.reservedQuantity ?? 0;
+      sold = d.soldQuantity ?? 0;
+      threshold = d.lowStockThreshold ?? 10;
+      productId = d.productId || productId;
+      sku = d.sku || sku;
+    }
+
+    const newAvailable = Math.max(0, available + adjustment);
+    const newStatus =
+      newAvailable <= 0
+        ? 'OUT_OF_STOCK'
+        : newAvailable <= threshold
+        ? 'LOW_STOCK'
+        : 'IN_STOCK';
+
+    const updatedInv = {
+      id: invId,
+      variantId,
+      productId,
+      sku,
+      availableQuantity: newAvailable,
+      reservedQuantity: reserved,
+      soldQuantity: sold,
+      lowStockThreshold: threshold,
+      status: newStatus,
+      updatedAt: now,
+    };
+
+    transaction.set(invRef, updatedInv, { merge: true });
+
+    await writeAuthoritativeAuditLog(
+      db,
+      {
+        actorUserId: callerUid,
+        actorEmail: callerEmail,
+        actorRoles: callerRoles,
+        action: 'INVENTORY_ADJUSTED',
+        resourceType: 'inventory',
+        resourceId: invId,
+        metadata: {
+          variantId,
+          adjustment,
+          previousAvailable: available,
+          newAvailable,
+          reason: reason || 'Manual Admin Adjustment',
+        },
+      },
+      transaction
+    );
+
+    return updatedInv;
+  });
+
+  return { success: true, inventory: result };
+});
+
+/**
+ * Callable Function: Authoritative Customer Order Creation
+ * Validates authentication, products, availability, loads authoritative prices,
+ * calculates subtotal/shipping/total, validates inventory atomically, checks idempotency,
+ * creates order, and records an audit event.
+ */
+export const createCustomerOrder = functions.https.onCall(async (data, context) => {
+  if (!context.auth) {
+    throw new functions.https.HttpsError('unauthenticated', 'Caller must be authenticated to place an order.');
+  }
+
+  const callerUid = context.auth.uid;
+  const callerEmail = context.auth.token.email || '';
+
+  // Fetch caller profile
+  const callerSnap = await db.collection('users').doc(callerUid).get();
+  if (!callerSnap.exists) {
+    throw new functions.https.HttpsError('not-found', 'Customer profile not found.');
+  }
+  const callerData = callerSnap.data()!;
+  if (callerData.status === 'suspended' || callerData.status === 'archived') {
+    throw new functions.https.HttpsError('permission-denied', 'Customer account is not in active standing.');
+  }
+  const callerRoles: string[] = callerData.roles || ['CUSTOMER'];
+
+  const { items, shippingAddress, idempotencyKey } = data || {};
+
+  // 1. Idempotency Check
+  if (idempotencyKey && typeof idempotencyKey === 'string' && idempotencyKey.trim().length > 0) {
+    const existingOrdersSnap = await db
+      .collection('orders')
+      .where('userId', '==', callerUid)
+      .where('idempotencyKey', '==', idempotencyKey.trim())
+      .limit(1)
+      .get();
+
+    if (!existingOrdersSnap.empty) {
+      const existingOrder = existingOrdersSnap.docs[0].data();
+      return {
+        success: true,
+        order: { id: existingOrdersSnap.docs[0].id, ...existingOrder },
+        isDuplicate: true,
+        message: 'Order already processed with provided idempotency key.',
+      };
+    }
+  }
+
+  // 2. Validate Order Items
+  if (!Array.isArray(items) || items.length === 0) {
+    throw new functions.https.HttpsError('invalid-argument', 'Order must contain at least one item.');
+  }
+  if (items.length > 25) {
+    throw new functions.https.HttpsError('invalid-argument', 'Order item limit exceeded (max 25 items per order).');
+  }
+
+  for (const it of items) {
+    if (!it.variantId || typeof it.variantId !== 'string') {
+      throw new functions.https.HttpsError('invalid-argument', 'Each item must specify a valid variantId string.');
+    }
+    if (!Number.isInteger(it.quantity) || it.quantity < 1 || it.quantity > 50) {
+      throw new functions.https.HttpsError('invalid-argument', `Invalid quantity for item ${it.variantId}: must be an integer between 1 and 50.`);
+    }
+  }
+
+  // 3. Validate Shipping Address
+  if (!shippingAddress || typeof shippingAddress !== 'object') {
+    throw new functions.https.HttpsError('invalid-argument', 'Shipping address is required.');
+  }
+  const { recipientName, phone, wilaya, city, address, notes } = shippingAddress;
+  if (!recipientName || typeof recipientName !== 'string' || recipientName.trim().length < 2) {
+    throw new functions.https.HttpsError('invalid-argument', 'Recipient name is required (minimum 2 characters).');
+  }
+  if (!phone || typeof phone !== 'string' || phone.trim().length < 8) {
+    throw new functions.https.HttpsError('invalid-argument', 'Valid phone number is required (minimum 8 characters).');
+  }
+  if (!wilaya || typeof wilaya !== 'string' || wilaya.trim().length === 0) {
+    throw new functions.https.HttpsError('invalid-argument', 'Wilaya is required.');
+  }
+  if (!city || typeof city !== 'string' || city.trim().length === 0) {
+    throw new functions.https.HttpsError('invalid-argument', 'City is required.');
+  }
+  if (!address || typeof address !== 'string' || address.trim().length === 0) {
+    throw new functions.https.HttpsError('invalid-argument', 'Delivery address is required.');
+  }
+
+  const now = new Date().toISOString();
+
+  // 4. Run Atomic Transaction for Stock Verification, Pricing, and Creation
+  const orderResult = await db.runTransaction(async (transaction) => {
+    let subtotal = 0;
+    const orderItems: any[] = [];
+    const inventoryUpdates: Array<{ ref: admin.firestore.DocumentReference; updateData: any }> = [];
+
+    for (const it of items) {
+      const variantDocRef = db.collection('productVariants').doc(it.variantId);
+      const variantSnap = await transaction.get(variantDocRef);
+
+      let variantData: any = null;
+      if (variantSnap.exists) {
+        variantData = variantSnap.data();
+      } else {
+        // Check canonical catalog fallback
+        const matchingSku = Object.keys(CANONICAL_COMMERCE_CATALOG).find(
+          (k) => `var-${k.toLowerCase()}` === it.variantId || k === it.variantId
+        );
+        if (matchingSku) {
+          const seed = CANONICAL_COMMERCE_CATALOG[matchingSku];
+          variantData = {
+            id: it.variantId,
+            productId: seed.sku.toLowerCase().startsWith('zr-bndl') ? 'ziron-complete-bundle' : `ziron-phase-0${seed.phase}`,
+            sku: seed.sku,
+            name: seed.name,
+            quantity: seed.capsules,
+            unit: 'capsules',
+            price: seed.priceDzd,
+            currency: 'DZD',
+            status: 'ACTIVE',
+            inventoryId: `inv-${seed.sku.toLowerCase()}`,
+          };
+        }
+      }
+
+      if (!variantData) {
+        throw new functions.https.HttpsError('not-found', `Product variant "${it.variantId}" does not exist.`);
+      }
+
+      if (variantData.status !== 'ACTIVE') {
+        throw new functions.https.HttpsError(
+          'failed-precondition',
+          `Product variant "${variantData.sku}" is currently unavailable (status: ${variantData.status}).`
+        );
+      }
+
+      // Check product status
+      const productDocRef = db.collection('products').doc(variantData.productId);
+      const productSnap = await transaction.get(productDocRef);
+      if (productSnap.exists) {
+        const pData = productSnap.data()!;
+        if (pData.status !== 'ACTIVE') {
+          throw new functions.https.HttpsError(
+            'failed-precondition',
+            `Product "${pData.sku || variantData.productId}" is not currently active for purchase.`
+          );
+        }
+      }
+
+      // Check authoritative inventory
+      const invId = variantData.inventoryId || `inv-${variantData.sku.toLowerCase()}`;
+      const invRef = db.collection('inventory').doc(invId);
+      const invSnap = await transaction.get(invRef);
+
+      let available = 100;
+      let reserved = 0;
+      let sold = 0;
+      let threshold = 10;
+
+      if (invSnap.exists) {
+        const invData = invSnap.data()!;
+        available = invData.availableQuantity ?? 0;
+        reserved = invData.reservedQuantity ?? 0;
+        sold = invData.soldQuantity ?? 0;
+        threshold = invData.lowStockThreshold ?? 10;
+      }
+
+      if (available < it.quantity) {
+        throw new functions.https.HttpsError(
+          'failed-precondition',
+          `Insufficient inventory for "${variantData.sku}". Requested: ${it.quantity}, Available: ${available}.`
+        );
+      }
+
+      // Authoritative calculation
+      const unitPrice = variantData.price;
+      const lineSubtotal = unitPrice * it.quantity;
+      subtotal += lineSubtotal;
+
+      const variantName = typeof variantData.name === 'string'
+        ? variantData.name
+        : (variantData.name?.en || variantData.sku);
+
+      orderItems.push({
+        productId: variantData.productId,
+        variantId: variantData.id,
+        sku: variantData.sku,
+        productNameSnapshot: variantName,
+        variantNameSnapshot: variantName,
+        quantity: it.quantity,
+        unitPrice,
+        subtotal: lineSubtotal,
+      });
+
+      const newAvailable = available - it.quantity;
+      const newReserved = reserved + it.quantity;
+      const newStatus =
+        newAvailable <= 0
+          ? 'OUT_OF_STOCK'
+          : newAvailable <= threshold
+          ? 'LOW_STOCK'
+          : 'IN_STOCK';
+
+      inventoryUpdates.push({
+        ref: invRef,
+        updateData: {
+          id: invId,
+          variantId: variantData.id,
+          productId: variantData.productId,
+          sku: variantData.sku,
+          availableQuantity: newAvailable,
+          reservedQuantity: newReserved,
+          soldQuantity: sold,
+          lowStockThreshold: threshold,
+          status: newStatus,
+          updatedAt: now,
+        },
+      });
+    }
+
+    // Apply inventory updates
+    for (const update of inventoryUpdates) {
+      transaction.set(update.ref, update.updateData, { merge: true });
+    }
+
+    // Calculate Authoritative Shipping and Total
+    const shippingCost = subtotal >= 9000 ? 0 : 600; // Free shipping on complete bundle or orders >= 9000 DZD
+    const total = subtotal + shippingCost;
+
+    const orderRef = db.collection('orders').doc();
+    const orderNumber =
+      'ZR-ORD-' +
+      now.slice(0, 10).replace(/-/g, '') +
+      '-' +
+      crypto.randomBytes(3).toString('hex').toUpperCase();
+
+    const orderData = {
+      id: orderRef.id,
+      orderNumber,
+      userId: callerUid,
+      customerSnapshot: {
+        uid: callerUid,
+        email: callerEmail,
+        displayName: callerData.displayName || '',
+        phone: callerData.phone || phone,
+      },
+      items: orderItems,
+      subtotal,
+      discounts: 0,
+      shippingCost,
+      total,
+      currency: 'DZD',
+      status: 'PENDING',
+      paymentStatus: 'UNPAID',
+      fulfillmentStatus: 'UNFULFILLED',
+      shippingAddress: {
+        recipientName: recipientName.trim(),
+        phone: phone.trim(),
+        wilaya: wilaya.trim(),
+        city: city.trim(),
+        address: address.trim(),
+        notes: notes ? String(notes).trim() : '',
+      },
+      idempotencyKey: idempotencyKey ? String(idempotencyKey).trim() : null,
+      history: [
+        {
+          status: 'PENDING',
+          paymentStatus: 'UNPAID',
+          fulfillmentStatus: 'UNFULFILLED',
+          timestamp: now,
+          actorUserId: callerUid,
+          note: 'Order placed by customer',
+        },
+      ],
+      createdAt: now,
+      updatedAt: now,
+    };
+
+    transaction.set(orderRef, orderData);
+
+    await writeAuthoritativeAuditLog(
+      db,
+      {
+        actorUserId: callerUid,
+        actorEmail: callerEmail,
+        actorRoles: callerRoles,
+        action: 'ORDER_CREATED',
+        resourceType: 'orders',
+        resourceId: orderRef.id,
+        metadata: {
+          orderNumber,
+          subtotal,
+          shippingCost,
+          total,
+          itemCount: orderItems.length,
+        },
+      },
+      transaction
+    );
+
+    return orderData;
+  });
+
+  return { success: true, order: orderResult, isDuplicate: false };
+});
+
+/**
+ * Callable Function: Transition Order Status (Admin / Order Manager)
+ */
+export const updateOrderStatus = functions.https.onCall(async (data, context) => {
+  const { callerUid, callerEmail, callerRoles } = await assertCanManageOrders(context);
+  const { orderId, status, note } = data || {};
+
+  if (!orderId || typeof orderId !== 'string') {
+    throw new functions.https.HttpsError('invalid-argument', 'Valid orderId is required.');
+  }
+
+  const validStatuses = ['PENDING', 'CONFIRMED', 'PROCESSING', 'SHIPPED', 'DELIVERED', 'CANCELLED'];
+  if (!status || !validStatuses.includes(status)) {
+    throw new functions.https.HttpsError('invalid-argument', `Invalid order status. Allowed: ${validStatuses.join(', ')}`);
+  }
+
+  const orderRef = db.collection('orders').doc(orderId);
+  const snap = await orderRef.get();
+  if (!snap.exists) {
+    throw new functions.https.HttpsError('not-found', `Order ${orderId} not found.`);
+  }
+
+  const currentOrder = snap.data()!;
+  const now = new Date().toISOString();
+
+  // If transitioning to CANCELLED and was not previously CANCELLED, restore inventory
+  if (status === 'CANCELLED' && currentOrder.status !== 'CANCELLED') {
+    const batch = db.batch();
+    for (const item of currentOrder.items || []) {
+      const invId = `inv-${item.sku.toLowerCase()}`;
+      const invRef = db.collection('inventory').doc(invId);
+      const invSnap = await invRef.get();
+      if (invSnap.exists) {
+        const invData = invSnap.data()!;
+        const available = (invData.availableQuantity ?? 0) + item.quantity;
+        const reserved = Math.max(0, (invData.reservedQuantity ?? 0) - item.quantity);
+        const threshold = invData.lowStockThreshold ?? 10;
+        const newStatus =
+          available <= 0 ? 'OUT_OF_STOCK' : available <= threshold ? 'LOW_STOCK' : 'IN_STOCK';
+
+        batch.update(invRef, {
+          availableQuantity: available,
+          reservedQuantity: reserved,
+          status: newStatus,
+          updatedAt: now,
+        });
+      }
+    }
+    await batch.commit();
+  }
+
+  const historyEntry = {
+    status,
+    paymentStatus: currentOrder.paymentStatus,
+    fulfillmentStatus:
+      status === 'DELIVERED'
+        ? 'DELIVERED'
+        : status === 'SHIPPED'
+        ? 'SHIPPED'
+        : status === 'PROCESSING'
+        ? 'PROCESSING'
+        : currentOrder.fulfillmentStatus,
+    timestamp: now,
+    actorUserId: callerUid,
+    note: note || `Order status updated to ${status}`,
+  };
+
+  const updates: Record<string, any> = {
+    status,
+    fulfillmentStatus: historyEntry.fulfillmentStatus,
+    history: admin.firestore.FieldValue.arrayUnion(historyEntry),
+    updatedAt: now,
+  };
+
+  await orderRef.update(updates);
+
+  await writeAuthoritativeAuditLog(db, {
+    actorUserId: callerUid,
+    actorEmail: callerEmail,
+    actorRoles: callerRoles,
+    action: 'ORDER_STATUS_CHANGED',
+    resourceType: 'orders',
+    resourceId: orderId,
+    metadata: {
+      previousStatus: currentOrder.status,
+      newStatus: status,
+      note,
+    },
+  });
+
+  const updatedDoc = await orderRef.get();
+  return { success: true, order: { id: updatedDoc.id, ...updatedDoc.data() } };
+});
+
+/**
+ * Callable Function: Transition Payment Status (Admin / Order Manager)
+ */
+export const updatePaymentStatus = functions.https.onCall(async (data, context) => {
+  const { callerUid, callerEmail, callerRoles } = await assertCanManageOrders(context);
+  const { orderId, paymentStatus, note } = data || {};
+
+  if (!orderId || typeof orderId !== 'string') {
+    throw new functions.https.HttpsError('invalid-argument', 'Valid orderId is required.');
+  }
+
+  const validPaymentStatuses = ['UNPAID', 'PENDING', 'PAID', 'FAILED', 'REFUNDED'];
+  if (!paymentStatus || !validPaymentStatuses.includes(paymentStatus)) {
+    throw new functions.https.HttpsError('invalid-argument', `Invalid payment status. Allowed: ${validPaymentStatuses.join(', ')}`);
+  }
+
+  const orderRef = db.collection('orders').doc(orderId);
+  const snap = await orderRef.get();
+  if (!snap.exists) {
+    throw new functions.https.HttpsError('not-found', `Order ${orderId} not found.`);
+  }
+
+  const currentOrder = snap.data()!;
+  const now = new Date().toISOString();
+
+  // If moving from UNPAID/PENDING to PAID: move items from reservedQuantity to soldQuantity
+  if (paymentStatus === 'PAID' && currentOrder.paymentStatus !== 'PAID') {
+    const batch = db.batch();
+    for (const item of currentOrder.items || []) {
+      const invId = `inv-${item.sku.toLowerCase()}`;
+      const invRef = db.collection('inventory').doc(invId);
+      const invSnap = await invRef.get();
+      if (invSnap.exists) {
+        const invData = invSnap.data()!;
+        const reserved = Math.max(0, (invData.reservedQuantity ?? 0) - item.quantity);
+        const sold = (invData.soldQuantity ?? 0) + item.quantity;
+        batch.update(invRef, {
+          reservedQuantity: reserved,
+          soldQuantity: sold,
+          updatedAt: now,
+        });
+      }
+    }
+    await batch.commit();
+  }
+
+  const historyEntry = {
+    status: currentOrder.status,
+    paymentStatus,
+    fulfillmentStatus: currentOrder.fulfillmentStatus,
+    timestamp: now,
+    actorUserId: callerUid,
+    note: note || `Payment status updated to ${paymentStatus}`,
+  };
+
+  await orderRef.update({
+    paymentStatus,
+    history: admin.firestore.FieldValue.arrayUnion(historyEntry),
+    updatedAt: now,
+  });
+
+  await writeAuthoritativeAuditLog(db, {
+    actorUserId: callerUid,
+    actorEmail: callerEmail,
+    actorRoles: callerRoles,
+    action: 'PAYMENT_STATUS_CHANGED',
+    resourceType: 'orders',
+    resourceId: orderId,
+    metadata: {
+      previousPaymentStatus: currentOrder.paymentStatus,
+      newPaymentStatus: paymentStatus,
+      note,
+    },
+  });
+
+  const updatedDoc = await orderRef.get();
+  return { success: true, order: { id: updatedDoc.id, ...updatedDoc.data() } };
+});
+
+/**
+ * Callable Function: Cancel Order (Customer or Staff)
+ * Normal customers may cancel only their own PENDING & UNPAID orders.
+ * Staff can cancel orders at any pre-shipped state.
+ */
+export const cancelCustomerOrder = functions.https.onCall(async (data, context) => {
+  if (!context.auth) {
+    throw new functions.https.HttpsError('unauthenticated', 'Caller must be authenticated.');
+  }
+
+  const callerUid = context.auth.uid;
+  const { orderId, reason } = data || {};
+
+  if (!orderId || typeof orderId !== 'string') {
+    throw new functions.https.HttpsError('invalid-argument', 'Valid orderId is required.');
+  }
+
+  const callerSnap = await db.collection('users').doc(callerUid).get();
+  const callerData = callerSnap.data() || {};
+  const callerRoles: string[] = callerData.roles || ['CUSTOMER'];
+  const isStaffCaller =
+    callerRoles.includes('SUPER_ADMIN') ||
+    callerRoles.includes('ADMIN') ||
+    callerRoles.includes('ORDER_MANAGER');
+
+  const orderRef = db.collection('orders').doc(orderId);
+  const snap = await orderRef.get();
+  if (!snap.exists) {
+    throw new functions.https.HttpsError('not-found', `Order ${orderId} not found.`);
+  }
+
+  const order = snap.data()!;
+  if (!isStaffCaller && order.userId !== callerUid) {
+    throw new functions.https.HttpsError('permission-denied', 'Cannot cancel an order belonging to another user.');
+  }
+
+  if (!isStaffCaller) {
+    if (order.status !== 'PENDING' || order.paymentStatus !== 'UNPAID') {
+      throw new functions.https.HttpsError(
+        'failed-precondition',
+        'Customers can only cancel orders that are PENDING and UNPAID. For processing or paid orders, please contact support.'
+      );
+    }
+  }
+
+  if (order.status === 'CANCELLED') {
+    return { success: true, order: { id: snap.id, ...order } };
+  }
+
+  const now = new Date().toISOString();
+
+  // Restore inventory
+  const batch = db.batch();
+  for (const item of order.items || []) {
+    const invId = `inv-${item.sku.toLowerCase()}`;
+    const invRef = db.collection('inventory').doc(invId);
+    const invSnap = await invRef.get();
+    if (invSnap.exists) {
+      const invData = invSnap.data()!;
+      const available = (invData.availableQuantity ?? 0) + item.quantity;
+      const reserved = Math.max(0, (invData.reservedQuantity ?? 0) - item.quantity);
+      const threshold = invData.lowStockThreshold ?? 10;
+      const newStatus =
+        available <= 0 ? 'OUT_OF_STOCK' : available <= threshold ? 'LOW_STOCK' : 'IN_STOCK';
+
+      batch.update(invRef, {
+        availableQuantity: available,
+        reservedQuantity: reserved,
+        status: newStatus,
+        updatedAt: now,
+      });
+    }
+  }
+
+  const historyEntry = {
+    status: 'CANCELLED',
+    paymentStatus: order.paymentStatus,
+    fulfillmentStatus: 'CANCELLED',
+    timestamp: now,
+    actorUserId: callerUid,
+    note: reason || 'Order cancelled by ' + (isStaffCaller ? 'staff' : 'customer'),
+  };
+
+  batch.update(orderRef, {
+    status: 'CANCELLED',
+    fulfillmentStatus: 'CANCELLED',
+    history: admin.firestore.FieldValue.arrayUnion(historyEntry),
+    updatedAt: now,
+  });
+
+  await batch.commit();
+
+  await writeAuthoritativeAuditLog(db, {
+    actorUserId: callerUid,
+    actorEmail: context.auth.token.email || '',
+    actorRoles: callerRoles,
+    action: 'ORDER_CANCELLED',
+    resourceType: 'orders',
+    resourceId: orderId,
+    metadata: {
+      reason: reason || 'Order cancelled',
+      cancelledByStaff: isStaffCaller,
+    },
+  });
+
+  const updatedDoc = await orderRef.get();
+  return { success: true, order: { id: updatedDoc.id, ...updatedDoc.data() } };
 });
 
 
