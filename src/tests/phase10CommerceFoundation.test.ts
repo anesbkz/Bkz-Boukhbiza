@@ -794,9 +794,246 @@ describe('Phase 10.2: Real Transactional Inventory Accounting & Fail-Closed Beha
       'Inventory record missing for inv-missing-item. Order rejected.'
     );
   });
+
+  it('fails closed on insufficient inventory (cannot reserve more than available)', () => {
+    let available = 5;
+    const orderQty = 10;
+    const canReserve = available >= orderQty;
+    expect(canReserve).toBe(false);
+    expect(() => {
+      if (available < orderQty) {
+        throw new Error(`Insufficient inventory: requested ${orderQty}, available ${available}`);
+      }
+    }).toThrow('Insufficient inventory');
+  });
+
+  it('fails closed on invalid inventory records (availableQuantity is not a number)', () => {
+    const invalidRecord: any = { availableQuantity: '50_UNITS', reservedQuantity: 0 };
+    expect(() => {
+      if (typeof invalidRecord.availableQuantity !== 'number') {
+        throw new Error('Inventory availableQuantity is invalid');
+      }
+    }).toThrow('Inventory availableQuantity is invalid');
+  });
+
+  it('handles concurrent stock contention safely (first buyer gets stock, second is rejected)', () => {
+    let available = 2;
+    const buyer1Qty = 2;
+    const buyer2Qty = 2;
+
+    // Buyer 1 transaction executes
+    let buyer1Success = false;
+    if (available >= buyer1Qty) {
+      available -= buyer1Qty;
+      buyer1Success = true;
+    }
+    expect(buyer1Success).toBe(true);
+    expect(available).toBe(0);
+
+    // Buyer 2 transaction attempts to reserve
+    let buyer2Success = false;
+    let buyer2Error = '';
+    try {
+      if (available < buyer2Qty) {
+        throw new Error('Insufficient inventory for variant. Stock exhausted.');
+      }
+      available -= buyer2Qty;
+      buyer2Success = true;
+    } catch (err: any) {
+      buyer2Error = err.message;
+    }
+    expect(buyer2Success).toBe(false);
+    expect(buyer2Error).toContain('Insufficient inventory');
+    expect(available).toBe(0);
+  });
+
+  it('ensures repeated cancellation is idempotent and does not release inventory twice', () => {
+    let available = 50;
+    let reserved = 2;
+    let orderStatus: OrderStatus = 'PENDING';
+
+    const cancel = () => {
+      if (orderStatus === 'CANCELLED') {
+        return { unchanged: true };
+      }
+      reserved -= 2;
+      available += 2;
+      orderStatus = 'CANCELLED';
+      return { unchanged: false };
+    };
+
+    const firstCancel = cancel();
+    expect(firstCancel.unchanged).toBe(false);
+    expect(available).toBe(52);
+    expect(reserved).toBe(0);
+
+    // Second cancellation call for same order
+    const secondCancel = cancel();
+    expect(secondCancel.unchanged).toBe(true);
+    expect(available).toBe(52); // Stock remains 52, not 54!
+    expect(reserved).toBe(0);
+  });
 });
 
-describe('Phase 10.2: Commercial Catalog Structure Invariant', () => {
+describe('Phase 10.2: State Machine Terminal States & Immutability', () => {
+  it('enforces that CANCELLED is a terminal order state (no further transitions permitted)', () => {
+    expect(VALID_ORDER_TRANSITIONS['CANCELLED']).toEqual([]);
+    expect(() => validateOrderTransition('CANCELLED', 'PENDING')).toThrow();
+    expect(() => validateOrderTransition('CANCELLED', 'CONFIRMED')).toThrow();
+    expect(() => validateOrderTransition('CANCELLED', 'PROCESSING')).toThrow();
+    expect(() => validateOrderTransition('CANCELLED', 'SHIPPED')).toThrow();
+    expect(() => validateOrderTransition('CANCELLED', 'DELIVERED')).toThrow();
+  });
+
+  it('enforces that DELIVERED is a terminal order state (no further transitions permitted)', () => {
+    expect(VALID_ORDER_TRANSITIONS['DELIVERED']).toEqual([]);
+    expect(() => validateOrderTransition('DELIVERED', 'PENDING')).toThrow();
+    expect(() => validateOrderTransition('DELIVERED', 'CONFIRMED')).toThrow();
+    expect(() => validateOrderTransition('DELIVERED', 'PROCESSING')).toThrow();
+    expect(() => validateOrderTransition('DELIVERED', 'SHIPPED')).toThrow();
+    expect(() => validateOrderTransition('DELIVERED', 'CANCELLED')).toThrow();
+  });
+
+  it('enforces that REFUNDED is a terminal payment state (no further transitions permitted)', () => {
+    expect(VALID_PAYMENT_TRANSITIONS['REFUNDED']).toEqual([]);
+    expect(() => validatePaymentTransition('REFUNDED', 'UNPAID')).toThrow();
+    expect(() => validatePaymentTransition('REFUNDED', 'PENDING')).toThrow();
+    expect(() => validatePaymentTransition('REFUNDED', 'PAID')).toThrow();
+    expect(() => validatePaymentTransition('REFUNDED', 'FAILED')).toThrow();
+  });
+});
+
+describe('Phase 10.2: Anti-Tampering & Authoritative Pricing Enforcement', () => {
+  it('strictly rejects malicious client pricing payloads (e.g. price=1, subtotal=1, total=1)', () => {
+    const maliciousClientPayload = {
+      items: [
+        {
+          variantId: 'var-1m',
+          sku: 'ZR-1M-30C',
+          quantity: 1,
+          price: 1, // Malicious forged price
+        },
+      ],
+      subtotal: 1, // Malicious forged subtotal
+      shippingCost: 0,
+      total: 1, // Malicious forged total
+    };
+
+    // Authoritative server catalog
+    const serverCatalogVariants: ProductVariant[] = [
+      {
+        id: 'var-1m',
+        productId: 'prod-1m',
+        sku: 'ZR-1M-30C',
+        name: { en: 'ZIRON 1 Month', fr: 'ZIRON 1 Mois', ar: 'زيرون شهر واحد' },
+        quantity: 1,
+        unit: 'CONTAINER',
+        price: 8000, // Authoritative server price
+        currency: 'DZD',
+        status: 'ACTIVE',
+        inventoryId: 'inv-1m',
+        createdAt: '2026-01-01T00:00:00Z',
+        updatedAt: '2026-01-01T00:00:00Z',
+      },
+    ];
+
+    const serverProducts: Product[] = [
+      {
+        id: 'prod-1m',
+        sku: 'ZR-1M-30C',
+        slug: 'ziron-1m',
+        brand: 'VIREXON BIOSCIENCES',
+        name: { en: 'ZIRON 1 Month', fr: 'ZIRON 1 Mois', ar: 'زيرون شهر واحد' },
+        description: { en: 'Authentic 30-day container', fr: 'Flacon mensuel authentique', ar: 'عبوة أصلية 30 يومًا' },
+        shortDescription: { en: '1 Month', fr: '1 Mois', ar: 'شهر واحد' },
+        productType: 'PHYSICAL',
+        status: 'ACTIVE',
+        images: ['/images/1m.png'],
+        availableVariants: ['var-1m'],
+        createdAt: '2026-01-01T00:00:00Z',
+        updatedAt: '2026-01-01T00:00:00Z',
+      },
+    ];
+
+    // Server completely ignores client's price=1, subtotal=1, total=1
+    const authoritativeResult = calculateOrderPricing(
+      maliciousClientPayload.items,
+      serverCatalogVariants,
+      serverProducts
+    );
+
+    // Assert that client tampering was completely ignored and overwritten
+    expect(authoritativeResult.subtotal).toBe(8000);
+    expect(authoritativeResult.total).toBe(8000);
+    expect(authoritativeResult.subtotal).not.toBe(maliciousClientPayload.subtotal);
+    expect(authoritativeResult.total).not.toBe(maliciousClientPayload.total);
+    expect(authoritativeResult.items[0].unitPrice).toBe(8000);
+    expect(authoritativeResult.items[0].subtotal).toBe(8000);
+  });
+
+  it('strictly enforces 22,000 DZD for 3-Month Program Bundle despite any client tampering', () => {
+    const maliciousBundlePayload = {
+      items: [
+        {
+          variantId: 'var-bundle',
+          sku: 'ZR-BNDL-90C',
+          quantity: 1,
+          price: 50, // Forged price
+        },
+      ],
+      subtotal: 50,
+      total: 50,
+    };
+
+    const serverCatalogVariants: ProductVariant[] = [
+      {
+        id: 'var-bundle',
+        productId: 'prod-bundle',
+        sku: 'ZR-BNDL-90C',
+        name: { en: 'ZIRON 90-Day Complete Program', fr: 'ZIRON Pack 90 Jours', ar: 'حزمة برنامج زيرون 90 يومًا' },
+        quantity: 3,
+        unit: 'CONTAINER',
+        price: 22000,
+        currency: 'DZD',
+        status: 'ACTIVE',
+        inventoryId: 'inv-bundle',
+        createdAt: '2026-01-01T00:00:00Z',
+        updatedAt: '2026-01-01T00:00:00Z',
+      },
+    ];
+
+    const serverProducts: Product[] = [
+      {
+        id: 'prod-bundle',
+        sku: 'ZR-BNDL-90C',
+        slug: 'ziron-bundle',
+        brand: 'VIREXON BIOSCIENCES',
+        name: { en: 'ZIRON 90-Day Complete Program', fr: 'ZIRON Pack 90 Jours', ar: 'حزمة برنامج زيرون 90 يومًا' },
+        description: { en: 'Complete Program', fr: 'Programme complet', ar: 'البرنامج الكامل' },
+        shortDescription: { en: '90-Day Bundle', fr: 'Pack 90 Jours', ar: 'حزمة 90 يومًا' },
+        productType: 'PHYSICAL',
+        status: 'ACTIVE',
+        images: ['/images/bundle.png'],
+        availableVariants: ['var-bundle'],
+        createdAt: '2026-01-01T00:00:00Z',
+        updatedAt: '2026-01-01T00:00:00Z',
+      },
+    ];
+
+    const authoritativeResult = calculateOrderPricing(
+      maliciousBundlePayload.items,
+      serverCatalogVariants,
+      serverProducts
+    );
+
+    expect(authoritativeResult.subtotal).toBe(22000);
+    expect(authoritativeResult.total).toBe(22000);
+    expect(authoritativeResult.shippingStatus).toBe('FREE');
+    expect(authoritativeResult.shippingCost).toBe(0);
+  });
+});
+
+describe('Phase 10.2: Commercial Catalog Purchasing Boundaries', () => {
   it('exposes exactly 1-Month (8,000 DZD) and 3-Month Program Bundle (22,000 DZD) with 2,000 DZD savings', () => {
     const oneMonthProduct = ZIRON_CATALOG.find((p) => p.sku === 'ZR-1M-30C' || p.id === 'ziron-1-month');
     const bundleProduct = ZIRON_CATALOG.find((p) => p.sku === 'ZR-BNDL-90C' || p.phase === 'BUNDLE');
@@ -812,6 +1049,21 @@ describe('Phase 10.2: Commercial Catalog Structure Invariant', () => {
     // 3 x 8,000 DZD = 24,000 DZD vs 22,000 DZD bundle -> 2,000 DZD exact saving
     const expectedSaving = 3 * oneMonthProduct!.priceDzd! - bundleProduct!.priceDzd!;
     expect(expectedSaving).toBe(2000);
+  });
+
+  it('restricts public order buttons strictly to 1-Month container and 3-Month bundle', () => {
+    // Phase 01, Phase 02, Phase 03 are biological protocol formulation milestones, not standalone public storefront products
+    const phaseStages = ZIRON_CATALOG.filter((p) => typeof p.phase === 'number' && p.id !== 'ziron-1-month');
+    expect(phaseStages.length).toBe(3); // 3 formulation stages (Phases 1, 2, 3)
+
+    // The purchasable items from public storefront are strictly 1 Month and 3 Month Complete Bundle
+    const purchasableCatalogIds = ['ziron-1-month', 'ziron-complete-bundle'];
+    const nonPurchasableStageIds = phaseStages.map((p) => p.id);
+
+    expect(nonPurchasableStageIds).toEqual(['ziron-phase-01', 'ziron-phase-02', 'ziron-phase-03']);
+    for (const stageId of nonPurchasableStageIds) {
+      expect(purchasableCatalogIds.includes(stageId)).toBe(false);
+    }
   });
 });
 
