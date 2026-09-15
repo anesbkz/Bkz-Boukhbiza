@@ -61,7 +61,7 @@ export const CommerceCatalogTab: React.FC = () => {
     name: '',
     quantity: 1,
     unit: 'CONTAINER',
-    price: 9800,
+    price: 8000,
     initialStock: 100,
     lowStockThreshold: 10,
   });
@@ -311,7 +311,7 @@ export const CommerceCatalogTab: React.FC = () => {
                           name: '1-Month Container',
                           quantity: 1,
                           unit: 'CONTAINER',
-                          price: 9800,
+                          price: 8000,
                           initialStock: 100,
                           lowStockThreshold: 10,
                         });

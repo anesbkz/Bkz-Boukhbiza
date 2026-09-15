@@ -291,6 +291,15 @@ service cloud.firestore {
     }
 
     // =========================================================================
+    // IDEMPOTENCY RECORDS (Server-Only Atomic Deduplication)
+    // Direct client read, write, create, update, delete is completely forbidden.
+    // Idempotency records are created and checked inside server-side transactions.
+    // =========================================================================
+    match /idempotencyRecords/{recordId} {
+      allow read, write: if false;
+    }
+
+    // =========================================================================
     // PRODUCT CODES COLLECTION (Cryptographic Container Serials)
     // Activation is strictly server-authoritative (activateContainerCode Cloud Function).
     // Client creation enforces unactivated initial state.

@@ -1,91 +1,97 @@
-import { OrderItem, Product, ProductVariant } from '@/types/commerce';
+import {
+  OrderItem,
+  Product,
+  ProductVariant,
+  ShippingStatus,
+  OrderStatus,
+  PaymentStatus,
+} from '@/types/commerce';
 import { Locale } from '@/types';
 
-export const STANDARD_SHIPPING_COST_DZD = 600;
-export const FREE_SHIPPING_THRESHOLD_DZD = 9000;
+/* ==========================================================================
+   PHASE 10.1: FINAL ZIRON COMMERCIAL PRICING CONSTANTS
+   ========================================================================== */
 
-export const WILAYA_SHIPPING_TIERS: Record<string, number> = {
-  // Algiers (Wilaya 16)
-  'alger': 600,
-  'algiers': 600,
-  '16': 600,
+export const ZIRON_1_MONTH_PRICE_DZD = 8000;
+export const ZIRON_3_MONTH_PROGRAM_PRICE_DZD = 22000;
+export const ZIRON_3_MONTH_SAVINGS_DZD = 2000; // 3 * 8000 = 24000 vs 22000
 
-  // Coastal / Central proximity
-  'oran': 800,
-  '31': 800,
-  'blida': 800,
-  '09': 800,
-  '9': 800,
-  'tipaza': 800,
-  '42': 800,
-  'boumerdes': 800,
-  '35': 800,
-  'annaba': 800,
-  '23': 800,
-  'tizi ouzou': 800,
-  '15': 800,
-  'bejaia': 800,
-  '06': 800,
-  '6': 800,
-  'mostaganem': 800,
-  '27': 800,
-  'chlef': 800,
-  '02': 800,
-  '2': 800,
+/* ==========================================================================
+   STATE MACHINE TRANSITION RULES (PHASE 10.1 HARDENED)
+   ========================================================================== */
 
-  // Inland / Highlands
-  'setif': 1000,
-  '19': 1000,
-  'constantine': 1000,
-  '25': 1000,
-  'batna': 1000,
-  '05': 1000,
-  '5': 1000,
-  'medea': 1000,
-  '26': 1000,
-  'tlemcen': 1000,
-  '13': 1000,
-  'sidi bel abbes': 1000,
-  '22': 1000,
-  'djelfa': 1000,
-  '17': 1000,
-  'msila': 1000,
-  '28': 1000,
-
-  // Southern / Sahara wilayas
-  'adrar': 1400,
-  '01': 1400,
-  '1': 1400,
-  'tamanrasset': 1400,
-  '11': 1400,
-  'ghardaia': 1400,
-  '47': 1400,
-  'ouargla': 1400,
-  '30': 1400,
-  'bechar': 1400,
-  '08': 1400,
-  '8': 1400,
-  'biskra': 1400,
-  '07': 1400,
-  '7': 1400,
-  'el oued': 1400,
-  '39': 1400,
-  'tindouf': 1400,
-  '37': 1400,
-  'illizi': 1400,
-  '33': 1400,
+export const VALID_ORDER_TRANSITIONS: Record<OrderStatus, OrderStatus[]> = {
+  PENDING: ['CONFIRMED', 'CANCELLED'],
+  CONFIRMED: ['PROCESSING', 'CANCELLED'],
+  PROCESSING: ['SHIPPED', 'CANCELLED'],
+  SHIPPED: ['DELIVERED'],
+  DELIVERED: [], // Terminal
+  CANCELLED: [], // Terminal
 };
 
-/**
- * Returns shipping fee in DZD for a destination wilaya.
- */
-export function getWilayaShippingCost(wilaya?: string): number {
-  if (!wilaya) return 1000;
-  const key = wilaya.trim().toLowerCase();
-  if (WILAYA_SHIPPING_TIERS[key]) {
-    return WILAYA_SHIPPING_TIERS[key];
+export const VALID_PAYMENT_TRANSITIONS: Record<PaymentStatus, PaymentStatus[]> = {
+  UNPAID: ['PENDING', 'PAID'],
+  PENDING: ['PAID', 'FAILED'],
+  FAILED: ['PENDING'],
+  PAID: ['REFUNDED'],
+  REFUNDED: [], // Terminal
+};
+
+export function validateOrderTransition(currentStatus: OrderStatus, targetStatus: OrderStatus): void {
+  if (currentStatus === targetStatus) return;
+  const allowed = VALID_ORDER_TRANSITIONS[currentStatus] || [];
+  if (!allowed.includes(targetStatus)) {
+    throw new Error(
+      `Invalid order status transition from ${currentStatus} to ${targetStatus}. Allowed: ${
+        allowed.length > 0 ? allowed.join(', ') : 'None (terminal state)'
+      }.`
+    );
   }
-  return 1000;
+}
+
+export function validatePaymentTransition(currentStatus: PaymentStatus, targetStatus: PaymentStatus): void {
+  if (currentStatus === targetStatus) return;
+  const allowed = VALID_PAYMENT_TRANSITIONS[currentStatus] || [];
+  if (!allowed.includes(targetStatus)) {
+    throw new Error(
+      `Invalid payment status transition from ${currentStatus} to ${targetStatus}. Allowed: ${
+        allowed.length > 0 ? allowed.join(', ') : 'None (terminal state)'
+      }.`
+    );
+  }
+}
+
+/**
+ * Authoritative shipping status determination:
+ * - If order consists solely of 3-Month Program / bundle items: FREE shipping (cost = 0).
+ * - If order contains any 1-Month container or individual phase containers: NEGOTIATION_REQUIRED (initial cost = 0).
+ * - Customer cannot manipulate or set shippingCost.
+ */
+export function determineAuthoritativeShipping(
+  items: Array<{ sku?: string; variantId?: string }>
+): { shippingStatus: ShippingStatus; initialShippingCost: number } {
+  if (!items || items.length === 0) {
+    return { shippingStatus: 'NEGOTIATION_REQUIRED', initialShippingCost: 0 };
+  }
+
+  const isAllFreeBundle = items.every((it) => {
+    const sku = (it.sku || '').toUpperCase();
+    const id = (it.variantId || '').toUpperCase();
+    return (
+      sku === 'ZR-BNDL-90C' ||
+      sku === 'ZR-3M-90C' ||
+      sku.includes('BNDL') ||
+      sku.includes('3M') ||
+      id.includes('bundle') ||
+      id.includes('3m')
+    );
+  });
+
+  if (isAllFreeBundle) {
+    return { shippingStatus: 'FREE', initialShippingCost: 0 };
+  }
+
+  return { shippingStatus: 'NEGOTIATION_REQUIRED', initialShippingCost: 0 };
 }
 
 /**
@@ -111,7 +117,6 @@ export function formatDzdPrice(amount: number | null | undefined, locale: Locale
     return 'Price to be configured';
   }
 
-  // Standard comma-separated representation for en / fr
   if (locale === 'ar') {
     const formatted = new Intl.NumberFormat('ar-DZ').format(amount);
     return `${formatted} د.ج`;
@@ -122,15 +127,16 @@ export function formatDzdPrice(amount: number | null | undefined, locale: Locale
 
 /**
  * Computes authoritative pricing for an order request.
+ * Ignores any client-supplied totals or shipping fees.
  */
 export function calculateOrderPricing(
   items: Array<{ variantId: string; quantity: number }>,
   variants: ProductVariant[],
-  products: Product[],
-  wilaya?: string
+  products: Product[]
 ): {
   subtotal: number;
   shippingCost: number;
+  shippingStatus: ShippingStatus;
   total: number;
   currency: string;
   items: OrderItem[];
@@ -148,12 +154,14 @@ export function calculateOrderPricing(
     }
 
     const product = productMap.get(variant.productId);
-    const productName = typeof product?.name === 'string'
-      ? product.name
-      : (product?.name?.en || variant.sku);
-    const variantName = typeof variant.name === 'string'
-      ? variant.name
-      : (variant.name?.en || variant.sku);
+    const productName =
+      typeof product?.name === 'string'
+        ? product.name
+        : product?.name?.en || variant.sku;
+    const variantName =
+      typeof variant.name === 'string'
+        ? variant.name
+        : variant.name?.en || variant.sku;
     const itemSubtotal = variant.price * item.quantity;
 
     subtotal += itemSubtotal;
@@ -169,12 +177,13 @@ export function calculateOrderPricing(
     });
   }
 
-  const shippingCost = getWilayaShippingCost(wilaya);
-  const total = subtotal + shippingCost;
+  const { shippingStatus, initialShippingCost } = determineAuthoritativeShipping(orderItems);
+  const total = subtotal + initialShippingCost;
 
   return {
     subtotal,
-    shippingCost,
+    shippingCost: initialShippingCost,
+    shippingStatus,
     total,
     currency: 'DZD',
     items: orderItems,
@@ -229,9 +238,10 @@ export function calculateAuthoritativeSubtotal(
     const itemSubtotal = unitPrice * item.quantity;
     subtotal += itemSubtotal;
 
-    const variantName = typeof variant.name === 'string'
-      ? variant.name
-      : (variant.name?.en || variant.sku);
+    const variantName =
+      typeof variant.name === 'string'
+        ? variant.name
+        : variant.name?.en || variant.sku;
 
     orderItems.push({
       productId: variant.productId,
@@ -249,21 +259,11 @@ export function calculateAuthoritativeSubtotal(
 }
 
 /**
- * Computes authoritative shipping cost based on subtotal and destination.
- */
-export function calculateAuthoritativeShippingCost(subtotal: number, wilaya?: string): number {
-  if (subtotal >= FREE_SHIPPING_THRESHOLD_DZD) {
-    return 0; // Free shipping for high value orders / full bundles
-  }
-  return getWilayaShippingCost(wilaya);
-}
-
-/**
  * Computes authoritative total.
  */
 export function calculateAuthoritativeTotal(
   subtotal: number,
-  shippingCost: number,
+  shippingCost: number = 0,
   discounts: number = 0
 ): number {
   const cleanSubtotal = Math.max(0, subtotal);

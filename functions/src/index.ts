@@ -4891,10 +4891,12 @@ const CANONICAL_COMMERCE_CATALOG: Record<string, {
   priceDzd: number;
   phase: number | 'BUNDLE';
 }> = {
-  'ZR-PH01-30C': { sku: 'ZR-PH01-30C', name: 'ZIRON Phase 01', capsules: 30, priceDzd: 3500, phase: 1 },
-  'ZR-PH02-30C': { sku: 'ZR-PH02-30C', name: 'ZIRON Phase 02', capsules: 30, priceDzd: 3500, phase: 2 },
-  'ZR-PH03-30C': { sku: 'ZR-PH03-30C', name: 'ZIRON Phase 03', capsules: 30, priceDzd: 3500, phase: 3 },
-  'ZR-BNDL-90C': { sku: 'ZR-BNDL-90C', name: 'ZIRON 90-Day Complete Program Bundle', capsules: 90, priceDzd: 9500, phase: 'BUNDLE' },
+  'ZR-1M-30C': { sku: 'ZR-1M-30C', name: 'ZIRON 1 Month', capsules: 30, priceDzd: 8000, phase: 1 },
+  'ZR-PH01-30C': { sku: 'ZR-PH01-30C', name: 'ZIRON 1 Month (Phase 01)', capsules: 30, priceDzd: 8000, phase: 1 },
+  'ZR-PH02-30C': { sku: 'ZR-PH02-30C', name: 'ZIRON 1 Month (Phase 02)', capsules: 30, priceDzd: 8000, phase: 2 },
+  'ZR-PH03-30C': { sku: 'ZR-PH03-30C', name: 'ZIRON 1 Month (Phase 03)', capsules: 30, priceDzd: 8000, phase: 3 },
+  'ZR-BNDL-90C': { sku: 'ZR-BNDL-90C', name: 'ZIRON 3 Month Program', capsules: 90, priceDzd: 22000, phase: 'BUNDLE' },
+  'ZR-3M-90C': { sku: 'ZR-3M-90C', name: 'ZIRON 3 Month Program', capsules: 90, priceDzd: 22000, phase: 'BUNDLE' },
 };
 
 /**
@@ -5249,98 +5251,37 @@ export const updateCommerceInventory = functions.https.onCall(async (data, conte
   return { success: true, inventory: result };
 });
 
-const COMMERCE_WILAYA_SHIPPING_TIERS: Record<string, number> = {
-  // Algiers (Wilaya 16)
-  'alger': 600,
-  'algiers': 600,
-  '16': 600,
+function determineServerShipping(orderItems: Array<{ sku: string }>): {
+  shippingStatus: 'NEGOTIATION_REQUIRED' | 'FREE';
+  shippingCost: number;
+} {
+  const isAllFreeBundle =
+    orderItems.length > 0 &&
+    orderItems.every((it) => {
+      const sku = (it.sku || '').toUpperCase();
+      return sku === 'ZR-BNDL-90C' || sku === 'ZR-3M-90C' || sku.includes('BNDL') || sku.includes('3M');
+    });
 
-  // Coastal / Central proximity
-  'oran': 800,
-  '31': 800,
-  'blida': 800,
-  '09': 800,
-  '9': 800,
-  'tipaza': 800,
-  '42': 800,
-  'boumerdes': 800,
-  '35': 800,
-  'annaba': 800,
-  '23': 800,
-  'tizi ouzou': 800,
-  '15': 800,
-  'bejaia': 800,
-  '06': 800,
-  '6': 800,
-  'mostaganem': 800,
-  '27': 800,
-  'chlef': 800,
-  '02': 800,
-  '2': 800,
-
-  // Inland / Highlands
-  'setif': 1000,
-  '19': 1000,
-  'constantine': 1000,
-  '25': 1000,
-  'batna': 1000,
-  '05': 1000,
-  '5': 1000,
-  'medea': 1000,
-  '26': 1000,
-  'tlemcen': 1000,
-  '13': 1000,
-  'sidi bel abbes': 1000,
-  '22': 1000,
-  'djelfa': 1000,
-  '17': 1000,
-  'msila': 1000,
-  '28': 1000,
-
-  // Southern / Sahara wilayas
-  'adrar': 1400,
-  '01': 1400,
-  '1': 1400,
-  'tamanrasset': 1400,
-  '11': 1400,
-  'ghardaia': 1400,
-  '47': 1400,
-  'ouargla': 1400,
-  '30': 1400,
-  'bechar': 1400,
-  '08': 1400,
-  '8': 1400,
-  'biskra': 1400,
-  '07': 1400,
-  '7': 1400,
-  'el oued': 1400,
-  '39': 1400,
-  'tindouf': 1400,
-  '37': 1400,
-  'illizi': 1400,
-  '33': 1400,
-};
-
-function getAuthoritativeWilayaShippingCost(wilaya?: string): number {
-  if (!wilaya) return 1000;
-  const key = wilaya.trim().toLowerCase();
-  return COMMERCE_WILAYA_SHIPPING_TIERS[key] || 1000;
+  if (isAllFreeBundle) {
+    return { shippingStatus: 'FREE', shippingCost: 0 };
+  }
+  return { shippingStatus: 'NEGOTIATION_REQUIRED', shippingCost: 0 };
 }
 
 const VALID_ORDER_TRANSITIONS: Record<string, string[]> = {
-  PENDING: ['CONFIRMED', 'PROCESSING', 'CANCELLED'],
+  PENDING: ['CONFIRMED', 'CANCELLED'],
   CONFIRMED: ['PROCESSING', 'CANCELLED'],
   PROCESSING: ['SHIPPED', 'CANCELLED'],
-  SHIPPED: ['DELIVERED', 'CANCELLED'],
+  SHIPPED: ['DELIVERED'],
   DELIVERED: [], // Terminal
   CANCELLED: [], // Terminal
 };
 
 const VALID_PAYMENT_TRANSITIONS: Record<string, string[]> = {
-  UNPAID: ['PENDING', 'PAID', 'FAILED'],
-  PENDING: ['PAID', 'FAILED', 'UNPAID'],
+  UNPAID: ['PENDING', 'PAID'],
+  PENDING: ['PAID', 'FAILED'],
+  FAILED: ['PENDING'],
   PAID: ['REFUNDED'],
-  FAILED: ['PENDING', 'UNPAID'],
   REFUNDED: [], // Terminal
 };
 
@@ -5371,30 +5312,11 @@ export const createCustomerOrder = functions.https.onCall(async (data, context) 
 
   const { items, shippingAddress, idempotencyKey } = data || {};
 
-  // 1. Validate idempotencyKey if provided
+  // 1. Trim idempotencyKey if provided
   const trimmedIdempotencyKey =
     idempotencyKey && typeof idempotencyKey === 'string' && idempotencyKey.trim().length > 0
       ? idempotencyKey.trim()
       : null;
-
-  if (trimmedIdempotencyKey) {
-    const existingOrdersSnap = await db
-      .collection('orders')
-      .where('userId', '==', callerUid)
-      .where('idempotencyKey', '==', trimmedIdempotencyKey)
-      .limit(1)
-      .get();
-
-    if (!existingOrdersSnap.empty) {
-      const existingOrder = existingOrdersSnap.docs[0].data();
-      return {
-        success: true,
-        order: { id: existingOrdersSnap.docs[0].id, ...existingOrder },
-        isDuplicate: true,
-        message: 'Order already processed with provided idempotency key.',
-      };
-    }
-  }
 
   // 2. Validate Order Items
   if (!Array.isArray(items) || items.length === 0) {
@@ -5436,8 +5358,28 @@ export const createCustomerOrder = functions.https.onCall(async (data, context) 
 
   const now = new Date().toISOString();
 
-  // 4. Run Atomic Transaction for Stock Verification, Pricing, and Creation
+  // 4. Run Atomic Transaction for Idempotency, Stock Verification, Pricing, and Creation
   const orderResult = await db.runTransaction(async (transaction) => {
+    // ATOMIC IDEMPOTENCY CHECK
+    let idempDocRef: admin.firestore.DocumentReference | null = null;
+    if (trimmedIdempotencyKey) {
+      idempDocRef = db.collection('idempotencyRecords').doc(trimmedIdempotencyKey);
+      const idempSnap = await transaction.get(idempDocRef);
+      if (idempSnap.exists) {
+        const existingOrderId = idempSnap.data()?.orderId;
+        if (existingOrderId) {
+          const existingOrderDocRef = db.collection('orders').doc(existingOrderId);
+          const existingOrderSnap = await transaction.get(existingOrderDocRef);
+          if (existingOrderSnap.exists) {
+            return {
+              isDuplicate: true,
+              order: { id: existingOrderSnap.id, ...existingOrderSnap.data() },
+            };
+          }
+        }
+      }
+    }
+
     let subtotal = 0;
     const orderItems: any[] = [];
     const inventoryUpdates: Array<{ ref: admin.firestore.DocumentReference; updateData: any }> = [];
@@ -5458,7 +5400,9 @@ export const createCustomerOrder = functions.https.onCall(async (data, context) 
           const seed = CANONICAL_COMMERCE_CATALOG[matchingSku];
           variantData = {
             id: it.variantId,
-            productId: seed.sku.toLowerCase().startsWith('zr-bndl') ? 'ziron-complete-bundle' : `ziron-phase-0${seed.phase}`,
+            productId: seed.sku.toLowerCase().startsWith('zr-bndl') || seed.sku.toLowerCase().startsWith('zr-3m')
+              ? 'ziron-3m-program'
+              : `ziron-phase-0${seed.phase}`,
             sku: seed.sku,
             name: seed.name,
             quantity: seed.capsules,
@@ -5482,7 +5426,7 @@ export const createCustomerOrder = functions.https.onCall(async (data, context) 
         );
       }
 
-      // Check product status
+      // Check product status if product document exists
       const productDocRef = db.collection('products').doc(variantData.productId);
       const productSnap = await transaction.get(productDocRef);
       if (productSnap.exists) {
@@ -5495,23 +5439,30 @@ export const createCustomerOrder = functions.https.onCall(async (data, context) 
         }
       }
 
-      // Check authoritative inventory
+      // Check authoritative inventory — STRICT FAIL-CLOSED (NO DEFAULT QUANTITY)
       const invId = variantData.inventoryId || `inv-${variantData.sku.toLowerCase()}`;
       const invRef = db.collection('inventory').doc(invId);
       const invSnap = await transaction.get(invRef);
 
-      let available = 100;
-      let reserved = 0;
-      let sold = 0;
-      let threshold = 10;
-
-      if (invSnap.exists) {
-        const invData = invSnap.data()!;
-        available = invData.availableQuantity ?? 0;
-        reserved = invData.reservedQuantity ?? 0;
-        sold = invData.soldQuantity ?? 0;
-        threshold = invData.lowStockThreshold ?? 10;
+      if (!invSnap.exists) {
+        throw new functions.https.HttpsError(
+          'failed-precondition',
+          `Inventory record missing for variant "${variantData.sku}" (${invId}). Order rejected.`
+        );
       }
+
+      const invData = invSnap.data()!;
+      const available = invData.availableQuantity;
+      if (typeof available !== 'number') {
+        throw new functions.https.HttpsError(
+          'failed-precondition',
+          `Inventory availableQuantity is invalid for "${variantData.sku}". Order rejected.`
+        );
+      }
+
+      const reserved = invData.reservedQuantity ?? 0;
+      const sold = invData.soldQuantity ?? 0;
+      const threshold = invData.lowStockThreshold ?? 10;
 
       if (available < it.quantity) {
         throw new functions.https.HttpsError(
@@ -5566,13 +5517,13 @@ export const createCustomerOrder = functions.https.onCall(async (data, context) 
       });
     }
 
-    // Apply inventory updates
+    // Apply inventory updates atomically
     for (const update of inventoryUpdates) {
       transaction.set(update.ref, update.updateData, { merge: true });
     }
 
-    // Calculate Authoritative Shipping and Total using Wilaya tiers
-    const shippingCost = subtotal >= 9000 ? 0 : getAuthoritativeWilayaShippingCost(wilaya);
+    // Authoritative Shipping & Total Determination
+    const { shippingStatus, shippingCost } = determineServerShipping(orderItems);
     const total = subtotal + shippingCost;
 
     const orderRef = db.collection('orders').doc();
@@ -5596,6 +5547,7 @@ export const createCustomerOrder = functions.https.onCall(async (data, context) 
       subtotal,
       discounts: 0,
       shippingCost,
+      shippingStatus,
       total,
       currency: 'DZD',
       status: 'PENDING',
@@ -5615,6 +5567,7 @@ export const createCustomerOrder = functions.https.onCall(async (data, context) 
           status: 'PENDING',
           paymentStatus: 'UNPAID',
           fulfillmentStatus: 'UNFULFILLED',
+          shippingStatus,
           timestamp: now,
           actorUserId: callerUid,
           note: 'Order placed by customer',
@@ -5625,6 +5578,16 @@ export const createCustomerOrder = functions.https.onCall(async (data, context) 
     };
 
     transaction.set(orderRef, orderData);
+
+    // Save idempotency record atomically inside same transaction
+    if (idempDocRef && trimmedIdempotencyKey) {
+      transaction.set(idempDocRef, {
+        id: trimmedIdempotencyKey,
+        orderId: orderRef.id,
+        userId: callerUid,
+        createdAt: now,
+      });
+    }
 
     await writeAuthoritativeAuditLog(
       db,
@@ -5639,6 +5602,7 @@ export const createCustomerOrder = functions.https.onCall(async (data, context) 
           orderNumber,
           subtotal,
           shippingCost,
+          shippingStatus,
           total,
           currency: 'DZD',
           wilaya,
@@ -5648,10 +5612,10 @@ export const createCustomerOrder = functions.https.onCall(async (data, context) 
       transaction
     );
 
-    return orderData;
+    return { isDuplicate: false, order: orderData };
   });
 
-  return { success: true, order: orderResult, isDuplicate: false };
+  return { success: true, order: orderResult.order, isDuplicate: orderResult.isDuplicate };
 });
 
 /**
@@ -5704,13 +5668,22 @@ export const updateOrderStatus = functions.https.onCall(async (data, context) =>
         if (invSnap.exists) {
           const invData = invSnap.data()!;
           const isPaid = currentOrder.paymentStatus === 'PAID';
-          const available = (invData.availableQuantity ?? 0) + item.quantity;
-          const reserved = isPaid
-            ? (invData.reservedQuantity ?? 0)
-            : Math.max(0, (invData.reservedQuantity ?? 0) - item.quantity);
-          const sold = isPaid
-            ? Math.max(0, (invData.soldQuantity ?? 0) - item.quantity)
-            : (invData.soldQuantity ?? 0);
+          let available = invData.availableQuantity ?? 0;
+          let reserved = invData.reservedQuantity ?? 0;
+          let sold = invData.soldQuantity ?? 0;
+
+          if (isPaid) {
+            // Paid order: stock was moved to sold. Restock from sold to available.
+            const returnQty = Math.min(sold, item.quantity);
+            sold = Math.max(0, sold - returnQty);
+            available = available + returnQty;
+          } else {
+            // Unpaid order: stock was only reserved. Release from reserved to available.
+            const releaseQty = Math.min(reserved, item.quantity);
+            reserved = Math.max(0, reserved - releaseQty);
+            available = available + releaseQty;
+          }
+
           const threshold = invData.lowStockThreshold ?? 10;
           const newStatus =
             available <= 0 ? 'OUT_OF_STOCK' : available <= threshold ? 'LOW_STOCK' : 'IN_STOCK';
@@ -5827,11 +5800,14 @@ export const updatePaymentStatus = functions.https.onCall(async (data, context) 
         const invSnap = await transaction.get(invRef);
         if (invSnap.exists) {
           const invData = invSnap.data()!;
-          const reserved = Math.max(0, (invData.reservedQuantity ?? 0) - item.quantity);
-          const sold = (invData.soldQuantity ?? 0) + item.quantity;
+          const currentReserved = invData.reservedQuantity ?? 0;
+          const currentSold = invData.soldQuantity ?? 0;
+          const moveQty = Math.min(currentReserved, item.quantity);
+          const newReserved = Math.max(0, currentReserved - moveQty);
+          const newSold = currentSold + moveQty;
           transaction.update(invRef, {
-            reservedQuantity: reserved,
-            soldQuantity: sold,
+            reservedQuantity: newReserved,
+            soldQuantity: newSold,
             updatedAt: now,
           });
         }
@@ -5932,15 +5908,15 @@ export const cancelCustomerOrder = functions.https.onCall(async (data, context) 
         );
       }
     } else {
-      if (order.status === 'DELIVERED') {
+      if (order.status === 'SHIPPED' || order.status === 'DELIVERED') {
         throw new functions.https.HttpsError(
           'failed-precondition',
-          'Delivered orders cannot be cancelled.'
+          'Orders that are SHIPPED or DELIVERED cannot be cancelled.'
         );
       }
     }
 
-    // Restore inventory
+    // Restore inventory safely
     for (const item of order.items || []) {
       const invId = `inv-${item.sku.toLowerCase()}`;
       const invRef = db.collection('inventory').doc(invId);
@@ -5948,13 +5924,20 @@ export const cancelCustomerOrder = functions.https.onCall(async (data, context) 
       if (invSnap.exists) {
         const invData = invSnap.data()!;
         const isPaid = order.paymentStatus === 'PAID';
-        const available = (invData.availableQuantity ?? 0) + item.quantity;
-        const reserved = isPaid
-          ? (invData.reservedQuantity ?? 0)
-          : Math.max(0, (invData.reservedQuantity ?? 0) - item.quantity);
-        const sold = isPaid
-          ? Math.max(0, (invData.soldQuantity ?? 0) - item.quantity)
-          : (invData.soldQuantity ?? 0);
+        let available = invData.availableQuantity ?? 0;
+        let reserved = invData.reservedQuantity ?? 0;
+        let sold = invData.soldQuantity ?? 0;
+
+        if (isPaid) {
+          const returnQty = Math.min(sold, item.quantity);
+          sold = Math.max(0, sold - returnQty);
+          available = available + returnQty;
+        } else {
+          const releaseQty = Math.min(reserved, item.quantity);
+          reserved = Math.max(0, reserved - releaseQty);
+          available = available + releaseQty;
+        }
+
         const threshold = invData.lowStockThreshold ?? 10;
         const newStatus =
           available <= 0 ? 'OUT_OF_STOCK' : available <= threshold ? 'LOW_STOCK' : 'IN_STOCK';
@@ -6002,6 +5985,116 @@ export const cancelCustomerOrder = functions.https.onCall(async (data, context) 
       },
     });
   }
+
+  const updatedDoc = await orderRef.get();
+  return { success: true, order: { id: updatedDoc.id, ...updatedDoc.data() } };
+});
+
+/**
+ * Callable Function: Update Order Shipping (Admin / Order Manager)
+ * Allows staff to transition shippingStatus (NEGOTIATION_REQUIRED -> AGREED_WITH_CUSTOMER or FREE)
+ * and update the authoritative shipping fee and total.
+ */
+export const updateOrderShipping = functions.https.onCall(async (data, context) => {
+  const { callerUid, callerEmail, callerRoles } = await assertCanManageOrders(context);
+  const { orderId, shippingStatus, shippingCost, note } = data || {};
+
+  if (!orderId || typeof orderId !== 'string') {
+    throw new functions.https.HttpsError('invalid-argument', 'Valid orderId is required.');
+  }
+
+  const validShippingStatuses = ['NEGOTIATION_REQUIRED', 'AGREED_WITH_CUSTOMER', 'FREE'];
+  if (!shippingStatus || !validShippingStatuses.includes(shippingStatus)) {
+    throw new functions.https.HttpsError(
+      'invalid-argument',
+      `Invalid shipping status. Allowed: ${validShippingStatuses.join(', ')}`
+    );
+  }
+
+  let finalShippingCost = 0;
+  if (shippingStatus === 'FREE') {
+    finalShippingCost = 0;
+  } else if (shippingStatus === 'AGREED_WITH_CUSTOMER') {
+    if (typeof shippingCost !== 'number' || isNaN(shippingCost) || shippingCost < 0) {
+      throw new functions.https.HttpsError(
+        'invalid-argument',
+        'Valid non-negative shippingCost is required when shipping status is AGREED_WITH_CUSTOMER.'
+      );
+    }
+    finalShippingCost = Math.round(shippingCost);
+  } else if (shippingStatus === 'NEGOTIATION_REQUIRED') {
+    finalShippingCost = 0;
+  }
+
+  const orderRef = db.collection('orders').doc(orderId);
+  const now = new Date().toISOString();
+
+  const result = await db.runTransaction(async (transaction) => {
+    const snap = await transaction.get(orderRef);
+    if (!snap.exists) {
+      throw new functions.https.HttpsError('not-found', `Order ${orderId} not found.`);
+    }
+
+    const currentOrder = snap.data()!;
+
+    if (currentOrder.status === 'CANCELLED' || currentOrder.status === 'DELIVERED') {
+      throw new functions.https.HttpsError(
+        'failed-precondition',
+        `Cannot modify shipping for order in ${currentOrder.status} state.`
+      );
+    }
+
+    const subtotal = currentOrder.subtotal || 0;
+    const discounts = currentOrder.discounts || 0;
+    const newTotal = Math.max(0, subtotal + finalShippingCost - discounts);
+
+    const historyEntry = {
+      status: currentOrder.status,
+      paymentStatus: currentOrder.paymentStatus,
+      fulfillmentStatus: currentOrder.fulfillmentStatus,
+      shippingStatus,
+      shippingCost: finalShippingCost,
+      timestamp: now,
+      actorUserId: callerUid,
+      note: note || `Shipping updated to ${shippingStatus} (${finalShippingCost} DZD)`,
+    };
+
+    const updates = {
+      shippingStatus,
+      shippingCost: finalShippingCost,
+      total: newTotal,
+      history: admin.firestore.FieldValue.arrayUnion(historyEntry),
+      updatedAt: now,
+    };
+
+    transaction.update(orderRef, updates);
+
+    return {
+      order: { id: snap.id, ...currentOrder, ...updates },
+      previousShippingStatus: currentOrder.shippingStatus,
+      previousShippingCost: currentOrder.shippingCost,
+      newShippingStatus: shippingStatus,
+      newShippingCost: finalShippingCost,
+      newTotal,
+    };
+  });
+
+  await writeAuthoritativeAuditLog(db, {
+    actorUserId: callerUid,
+    actorEmail: callerEmail,
+    actorRoles: callerRoles,
+    action: 'ORDER_SHIPPING_UPDATED',
+    resourceType: 'orders',
+    resourceId: orderId,
+    metadata: {
+      previousShippingStatus: result.previousShippingStatus,
+      newShippingStatus: result.newShippingStatus,
+      previousShippingCost: result.previousShippingCost,
+      newShippingCost: result.newShippingCost,
+      newTotal: result.newTotal,
+      note,
+    },
+  });
 
   const updatedDoc = await orderRef.get();
   return { success: true, order: { id: updatedDoc.id, ...updatedDoc.data() } };

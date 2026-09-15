@@ -168,7 +168,11 @@ export const ShopPage: React.FC = () => {
                     {formatDzdPrice(bundleItem.priceDzd, locale)}
                   </span>
                   <span className="text-[11px] text-emerald-700 block font-medium mt-0.5">
-                    {locale === 'ar' ? 'توفير 1,000 د.ج مقارنة بالعبوات المنفردة' : locale === 'fr' ? 'Économie de 1 000 DZD par rapport aux phases individuelles' : 'Save 1,000 DZD compared to individual phases'}
+                    {locale === 'ar'
+                      ? 'توفير 2,000 د.ج مقارنة بـ 3 عبوات شهرية (24,000 د.ج) + شحن مجاني متضمن'
+                      : locale === 'fr'
+                      ? 'Économie de 2 000 DZD par rapport à 3 flacons individuels (24 000 DZD) + Livraison gratuite incluse'
+                      : 'Save 2,000 DZD compared to 3 individual containers (24,000 DZD) + Free Shipping Included'}
                   </span>
                 </div>
 
@@ -240,6 +244,10 @@ export const ShopPage: React.FC = () => {
                       <span className="font-bold font-mono text-[#0B2346] text-sm">
                         {formatDzdPrice(item.priceDzd, locale)}
                       </span>
+                    </div>
+                    <div className="flex items-center justify-between text-[11px] text-amber-700">
+                      <span>{locale === 'ar' ? 'الشحن:' : locale === 'fr' ? 'Livraison :' : 'Shipping:'}</span>
+                      <span className="font-medium">{locale === 'ar' ? 'يُتفق عليه حسب الولاية' : locale === 'fr' ? 'Convenu selon la wilaya' : 'Agreed based on wilaya'}</span>
                     </div>
                   </div>
 
@@ -435,9 +443,23 @@ export const ShopPage: React.FC = () => {
                     <h3 className="text-lg font-bold text-[#0B2346]">
                       {selectedProduct.name}
                     </h3>
-                    <div className="text-xs font-mono font-bold text-[#0B2346] mt-0.5">
-                      {locale === 'ar' ? 'السعر:' : locale === 'fr' ? 'Prix :' : 'Price:'} {formatDzdPrice(selectedProduct.priceDzd, locale)} ({s.codTag})
-                    </div>
+                    {selectedProduct.phase === 'BUNDLE' ? (
+                      <div className="text-xs font-mono font-bold text-emerald-700 mt-0.5">
+                        {locale === 'ar'
+                          ? `السعر: ${formatDzdPrice(selectedProduct.priceDzd, locale)} • الشحن مجاني متضمن (${s.codTag})`
+                          : locale === 'fr'
+                          ? `Prix : ${formatDzdPrice(selectedProduct.priceDzd, locale)} • Livraison gratuite incluse (${s.codTag})`
+                          : `Price: ${formatDzdPrice(selectedProduct.priceDzd, locale)} • Free Shipping Included (${s.codTag})`}
+                      </div>
+                    ) : (
+                      <div className="text-xs font-mono font-bold text-[#0B2346] mt-0.5">
+                        {locale === 'ar'
+                          ? `السعر: ${formatDzdPrice(selectedProduct.priceDzd, locale)} • تكلفة الشحن يتم الاتفاق عليها حسب الولاية (${s.codTag})`
+                          : locale === 'fr'
+                          ? `Prix : ${formatDzdPrice(selectedProduct.priceDzd, locale)} • Frais de livraison convenus selon la wilaya (${s.codTag})`
+                          : `Price: ${formatDzdPrice(selectedProduct.priceDzd, locale)} • Shipping fee agreed based on wilaya (${s.codTag})`}
+                      </div>
+                    )}
                   </div>
 
                   <div className="space-y-3 text-xs">
@@ -489,11 +511,17 @@ export const ShopPage: React.FC = () => {
 
                   <div className="p-3 bg-blue-50 border border-blue-200 text-[11px] text-blue-900 leading-relaxed">
                     <strong>{locale === 'ar' ? 'طريقة الاستلام والدفع:' : locale === 'fr' ? 'Modalités de livraison :' : 'Payment Terms:'}</strong>{' '}
-                    {locale === 'ar'
-                      ? 'يتم دفع المبلغ نقدًا لمندوب التوصيل عند استلام الطلب. سيتصل بك فريق التوصيل لتأكيد العنوان وموعد التسليم قبل خروج الطرد.'
-                      : locale === 'fr'
-                      ? 'Le paiement s’effectue en espèces à la livraison. Notre équipe logistique vous contactera par téléphone pour confirmer l’adresse avant l’expédition.'
-                      : 'Payment is collected in cash upon delivery to your address. Our delivery team will call you to confirm your address prior to dispatch.'}
+                    {selectedProduct.phase === 'BUNDLE'
+                      ? locale === 'ar'
+                        ? 'الشحن مجاني بالكامل لحزمة الـ 90 يومًا. يتم دفع 22,000 د.ج نقدًا لمندوب التوصيل عند استلام الطرد بعد التأكد من سلامة الأختام. سيتصل بك فريقنا لتأكيد موعد التسليم.'
+                        : locale === 'fr'
+                        ? 'La livraison est 100% offerte pour le Pack 90 Jours. Vous réglez 22 000 DZD en espèces à la réception après contrôle des scellés. Notre équipe vous contactera pour coordonner le créneau.'
+                        : 'Delivery is 100% free for the 90-Day Pack. You pay 22,000 DZD in cash upon delivery after inspecting intact tamper-evident seals. Our dispatch team will call to schedule delivery.'
+                      : locale === 'ar'
+                        ? 'يتم دفع 8,000 د.ج للمنتج بالإضافة إلى تكلفة الشحن المتفق عليها نقدًا عند الاستلام. سيتصل بك فريق التوصيل لتأكيد العنوان وتكلفة التوصيل المناسبة لولايتك.'
+                        : locale === 'fr'
+                        ? 'Le paiement de 8 000 DZD plus les frais de livraison convenus s’effectue en espèces à la livraison. Notre équipe vous appellera pour convenir du tarif selon votre wilaya.'
+                        : 'Payment of 8,000 DZD plus the agreed delivery fee is collected in cash upon arrival. Our team will call to confirm the delivery terms for your specific wilaya.'}
                   </div>
 
                   <div className="pt-2 flex gap-3">

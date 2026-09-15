@@ -8,11 +8,11 @@ export type { PublicCatalogItem };
  * ZIRON Product Catalog Model
  * Initial target market: Algeria (DZD).
  * 
- * Strict specifications:
- * - Phase 01: 30 capsules / 30-day supply (3,500 DZD)
- * - Phase 02: 30 capsules / 30-day supply (3,500 DZD)
- * - Phase 03: 30 capsules / 30-day supply (3,500 DZD)
- * - Complete Bundle: 3 x 30 capsules = 90 capsules total (9,500 DZD)
+ * Strict Phase 10.1 specifications:
+ * - Phase 01: 30 capsules / 30-day supply (8,000 DZD)
+ * - Phase 02: 30 capsules / 30-day supply (8,000 DZD)
+ * - Phase 03: 30 capsules / 30-day supply (8,000 DZD)
+ * - Complete 90-Day Program Bundle: 3 x 30 capsules = 90 capsules total (22,000 DZD, Free Shipping)
  */
 export const ZIRON_CATALOG: PublicCatalogItem[] = [
   {
@@ -22,7 +22,7 @@ export const ZIRON_CATALOG: PublicCatalogItem[] = [
     name: 'ZIRON Phase 01',
     capsuleCount: 30,
     supplyDays: 30,
-    priceDzd: 3500,
+    priceDzd: 8000,
     description: 'Phase 01 nutritional formulation container designed for the initial 30-day program phase.',
     badgeText: 'PHASE 01 — PROGRAM PHASE',
     containerColorHex: '#D62828',
@@ -35,7 +35,7 @@ export const ZIRON_CATALOG: PublicCatalogItem[] = [
     name: 'ZIRON Phase 02',
     capsuleCount: 30,
     supplyDays: 30,
-    priceDzd: 3500,
+    priceDzd: 8000,
     description: 'Phase 02 nutritional formulation container designed for the intermediate 30-day program phase.',
     badgeText: 'PHASE 02 — PROGRAM PHASE',
     containerColorHex: '#F28C28',
@@ -48,7 +48,7 @@ export const ZIRON_CATALOG: PublicCatalogItem[] = [
     name: 'ZIRON Phase 03',
     capsuleCount: 30,
     supplyDays: 30,
-    priceDzd: 3500,
+    priceDzd: 8000,
     description: 'Phase 03 nutritional formulation container designed for the final 30-day program phase.',
     badgeText: 'PHASE 03 — PROGRAM PHASE',
     containerColorHex: '#2E9E45',
@@ -61,8 +61,8 @@ export const ZIRON_CATALOG: PublicCatalogItem[] = [
     name: 'ZIRON 90-Day Complete Program Bundle',
     capsuleCount: 90, // Exactly 3 x 30 capsules = 90 capsules total
     supplyDays: 90,
-    priceDzd: 9500,
-    description: 'Complete three-phase protocol kit comprising three 30-capsule containers (Phase 01, Phase 02, and Phase 03) providing 90 capsules total.',
+    priceDzd: 22000,
+    description: 'Complete three-phase protocol kit comprising three 30-capsule containers (Phase 01, Phase 02, and Phase 03) providing 90 capsules total with free shipping included.',
     badgeText: 'COMPLETE 90-DAY PROTOCOL BUNDLE',
     containerColorHex: '#0B2346',
     colorName: 'TRI-PHASE NAVY',

@@ -31,6 +31,11 @@ export type FulfillmentStatus =
   | 'DELIVERED'
   | 'CANCELLED';
 
+export type ShippingStatus =
+  | 'NEGOTIATION_REQUIRED'
+  | 'AGREED_WITH_CUSTOMER'
+  | 'FREE';
+
 /**
  * Authoritative Product Domain Model
  */
@@ -140,6 +145,7 @@ export interface OrderHistoryEntry {
   status: OrderStatus;
   paymentStatus?: PaymentStatus;
   fulfillmentStatus?: FulfillmentStatus;
+  shippingStatus?: ShippingStatus;
   timestamp: string;
   actorUserId?: string;
   note?: string;
@@ -162,6 +168,7 @@ export interface Order {
   subtotal: number;
   discounts: number;
   shippingCost: number;
+  shippingStatus?: ShippingStatus;
   total: number;
   currency: string;
   status: OrderStatus;
@@ -206,6 +213,13 @@ export interface UpdateOrderStatusRequest {
 export interface UpdatePaymentStatusRequest {
   orderId: string;
   paymentStatus: PaymentStatus;
+  note?: string;
+}
+
+export interface UpdateOrderShippingRequest {
+  orderId: string;
+  shippingStatus: ShippingStatus;
+  shippingCost: number;
   note?: string;
 }
 

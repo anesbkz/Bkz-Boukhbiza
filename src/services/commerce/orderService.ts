@@ -16,6 +16,7 @@ import {
   CreateOrderResult,
   UpdateOrderStatusRequest,
   UpdatePaymentStatusRequest,
+  UpdateOrderShippingRequest,
   CancelOrderRequest,
   OrderStatus,
   PaymentStatus,
@@ -151,3 +152,18 @@ export async function updatePaymentStatusAdmin(
   const result = await callFn(payload);
   return result.data;
 }
+
+/**
+ * Admin: Updates shipping status and cost (finalizes agreed shipping)
+ */
+export async function updateOrderShippingAdmin(
+  payload: UpdateOrderShippingRequest
+): Promise<{ success: boolean; order: Order }> {
+  const callFn = httpsCallable<UpdateOrderShippingRequest, { success: boolean; order: Order }>(
+    functions,
+    'updateOrderShipping'
+  );
+  const result = await callFn(payload);
+  return result.data;
+}
+

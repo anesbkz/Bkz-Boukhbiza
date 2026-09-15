@@ -3,11 +3,13 @@ import {
   getAllOrdersAdmin,
   updateOrderStatusAdmin,
   updatePaymentStatusAdmin,
+  updateOrderShippingAdmin,
 } from '@/services/commerce/orderService';
 import {
   Order,
   OrderStatus,
   PaymentStatus,
+  ShippingStatus,
 } from '@/types/commerce';
 import { formatDzdPrice } from '@/services/commerce/pricingService';
 import { useI18n } from '@/context/I18nContext';
@@ -40,6 +42,7 @@ export const AdminOrdersPage: React.FC = () => {
   // Status transition state
   const [updating, setUpdating] = useState(false);
   const [statusNote, setStatusNote] = useState('');
+  const [agreedShippingCost, setAgreedShippingCost] = useState<number>(800);
   const [actionError, setActionError] = useState<string | null>(null);
 
   const loadOrders = async () => {
@@ -114,6 +117,34 @@ export const AdminOrdersPage: React.FC = () => {
     }
   };
 
+  const handleUpdateShipping = async (newShippingStatus: ShippingStatus) => {
+    if (!selectedOrder) return;
+    setUpdating(true);
+    setActionError(null);
+    try {
+      const cost =
+        newShippingStatus === 'FREE'
+          ? 0
+          : newShippingStatus === 'AGREED_WITH_CUSTOMER'
+          ? Math.max(0, agreedShippingCost)
+          : 0;
+
+      const res = await updateOrderShippingAdmin({
+        orderId: selectedOrder.id,
+        shippingStatus: newShippingStatus,
+        shippingCost: cost,
+        note: statusNote.trim() || undefined,
+      });
+      setSelectedOrder(res.order);
+      setStatusNote('');
+      await loadOrders();
+    } catch (err: any) {
+      setActionError(err?.message || 'Failed to update shipping status');
+    } finally {
+      setUpdating(false);
+    }
+  };
+
   const getStatusBadge = (status: OrderStatus) => {
     switch (status) {
       case 'CONFIRMED':
@@ -144,6 +175,18 @@ export const AdminOrdersPage: React.FC = () => {
       case 'UNPAID':
       default:
         return 'bg-zinc-800 text-zinc-400 border-zinc-700';
+    }
+  };
+
+  const getShippingBadge = (status?: ShippingStatus) => {
+    switch (status) {
+      case 'FREE':
+        return 'bg-emerald-900/30 text-emerald-400 border-emerald-800/50';
+      case 'AGREED_WITH_CUSTOMER':
+        return 'bg-blue-900/30 text-blue-400 border-blue-800/50';
+      case 'NEGOTIATION_REQUIRED':
+      default:
+        return 'bg-amber-900/30 text-amber-400 border-amber-800/50';
     }
   };
 
@@ -245,6 +288,7 @@ export const AdminOrdersPage: React.FC = () => {
                   <th className="py-3 px-4">Total</th>
                   <th className="py-3 px-4">Order Status</th>
                   <th className="py-3 px-4">Payment</th>
+                  <th className="py-3 px-4">Shipping</th>
                   <th className="py-3 px-4">Date</th>
                   <th className="py-3 px-4 text-right">Actions</th>
                 </tr>
@@ -279,6 +323,11 @@ export const AdminOrdersPage: React.FC = () => {
                     <td className="py-3 px-4">
                       <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium border ${getPaymentBadge(ord.paymentStatus)}`}>
                         {ord.paymentStatus}
+                      </span>
+                    </td>
+                    <td className="py-3 px-4">
+                      <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-[11px] font-medium border ${getShippingBadge(ord.shippingStatus)}`}>
+                        {ord.shippingStatus === 'FREE' ? 'FREE' : ord.shippingStatus === 'AGREED_WITH_CUSTOMER' ? 'AGREED' : 'NEEDS NEGO'}
                       </span>
                     </td>
                     <td className="py-3 px-4 text-xs text-zinc-400">
@@ -396,8 +445,13 @@ export const AdminOrdersPage: React.FC = () => {
                 <span>Authoritative Subtotal</span>
                 <span>{formatDzdPrice(selectedOrder.subtotal)}</span>
               </div>
-              <div className="flex justify-between text-xs text-zinc-400">
-                <span>Authoritative Delivery (Wilaya)</span>
+              <div className="flex justify-between text-xs text-zinc-400 items-center">
+                <div className="flex items-center gap-2">
+                  <span>Authoritative Delivery</span>
+                  <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-medium border ${getShippingBadge(selectedOrder.shippingStatus)}`}>
+                    {selectedOrder.shippingStatus === 'FREE' ? 'FREE' : selectedOrder.shippingStatus === 'AGREED_WITH_CUSTOMER' ? 'AGREED WITH CUSTOMER' : 'NEGOTIATION REQUIRED'}
+                  </span>
+                </div>
                 <span>{formatDzdPrice(selectedOrder.shippingCost)}</span>
               </div>
               {selectedOrder.discounts > 0 && (
@@ -460,6 +514,53 @@ export const AdminOrdersPage: React.FC = () => {
                     {pst}
                   </Button>
                 ))}
+              </div>
+
+              {/* Shipping Status & Fee Governance */}
+              <div className="pt-2 border-t border-zinc-800/80 space-y-2">
+                <div className="flex flex-wrap items-center gap-2">
+                  <span className="text-xs text-zinc-400 mr-2">Shipping Governance:</span>
+                  <Button
+                    size="sm"
+                    variant={selectedOrder.shippingStatus === 'NEGOTIATION_REQUIRED' ? 'primary' : 'outline'}
+                    disabled={updating || selectedOrder.shippingStatus === 'NEGOTIATION_REQUIRED'}
+                    onClick={() => handleUpdateShipping('NEGOTIATION_REQUIRED')}
+                    className="text-xs"
+                  >
+                    Negotiation Required (0 DZD)
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant={selectedOrder.shippingStatus === 'FREE' ? 'primary' : 'outline'}
+                    disabled={updating || selectedOrder.shippingStatus === 'FREE'}
+                    onClick={() => handleUpdateShipping('FREE')}
+                    className="text-xs"
+                  >
+                    Free Delivery (0 DZD)
+                  </Button>
+                </div>
+
+                <div className="flex items-center gap-2 pt-1">
+                  <span className="text-xs text-zinc-400">Agreed Shipping Fee:</span>
+                  <input
+                    type="number"
+                    min="0"
+                    step="50"
+                    value={agreedShippingCost}
+                    onChange={(e) => setAgreedShippingCost(Math.max(0, parseInt(e.target.value, 10) || 0))}
+                    className="w-28 px-2 py-1 bg-zinc-900 border border-zinc-800 rounded text-xs text-white"
+                  />
+                  <span className="text-xs text-zinc-500">DZD</span>
+                  <Button
+                    size="sm"
+                    variant={selectedOrder.shippingStatus === 'AGREED_WITH_CUSTOMER' ? 'primary' : 'outline'}
+                    disabled={updating}
+                    onClick={() => handleUpdateShipping('AGREED_WITH_CUSTOMER')}
+                    className="text-xs"
+                  >
+                    Set Agreed Shipping
+                  </Button>
+                </div>
               </div>
             </div>
 
