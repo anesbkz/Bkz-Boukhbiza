@@ -11,7 +11,11 @@ import {
   PaymentStatus,
   ShippingStatus,
 } from '@/types/commerce';
-import { formatDzdPrice } from '@/services/commerce/pricingService';
+import {
+  formatDzdPrice,
+  isValidOrderTransition,
+  isValidPaymentTransition,
+} from '@/services/commerce/pricingService';
 import { useI18n } from '@/context/I18nContext';
 import { Button } from '@/components/design-system/Button';
 import {
@@ -117,8 +121,35 @@ export const AdminOrdersPage: React.FC = () => {
     }
   };
 
+  const isOrderBundle = (order: Order | null): boolean => {
+    if (!order || !Array.isArray(order.items) || order.items.length === 0) return false;
+    return order.items.every((it) => {
+      const sku = (it.sku || '').toUpperCase();
+      const vid = (it.variantId || '').toUpperCase();
+      return (
+        sku === 'ZR-BNDL-90C' ||
+        sku === 'ZR-3M-90C' ||
+        sku.includes('BNDL') ||
+        sku.includes('3M') ||
+        vid.includes('BUNDLE') ||
+        vid.includes('3M')
+      );
+    });
+  };
+
   const handleUpdateShipping = async (newShippingStatus: ShippingStatus) => {
     if (!selectedOrder) return;
+
+    if (selectedOrder.status === 'CANCELLED' || selectedOrder.status === 'DELIVERED') {
+      setActionError(`Cannot modify shipping: order is already ${selectedOrder.status}.`);
+      return;
+    }
+
+    if (isOrderBundle(selectedOrder) && (newShippingStatus !== 'FREE' || agreedShippingCost > 0)) {
+      setActionError('The 3-Month Program Bundle is strictly protected with Free Shipping. Paid shipping cannot be assigned.');
+      return;
+    }
+
     setUpdating(true);
     setActionError(null);
     try {
@@ -485,82 +516,110 @@ export const AdminOrdersPage: React.FC = () => {
               <div className="flex flex-wrap gap-2">
                 <span className="text-xs text-zinc-400 self-center mr-2">Transition Order:</span>
                 {(['CONFIRMED', 'PROCESSING', 'SHIPPED', 'DELIVERED', 'CANCELLED'] as OrderStatus[]).map(
-                  (st) => (
-                    <Button
-                      key={st}
-                      size="sm"
-                      variant={selectedOrder.status === st ? 'primary' : 'outline'}
-                      disabled={updating || selectedOrder.status === st}
-                      onClick={() => handleUpdateStatus(st)}
-                      className="text-xs"
-                    >
-                      {st}
-                    </Button>
-                  )
+                  (st) => {
+                    const isAllowed = isValidOrderTransition(selectedOrder.status, st);
+                    return (
+                      <Button
+                        key={st}
+                        size="sm"
+                        variant={selectedOrder.status === st ? 'primary' : 'outline'}
+                        disabled={updating || selectedOrder.status === st || !isAllowed}
+                        onClick={() => handleUpdateStatus(st)}
+                        className="text-xs"
+                        title={!isAllowed ? `Transition from ${selectedOrder.status} to ${st} is not permitted.` : undefined}
+                      >
+                        {st}
+                      </Button>
+                    );
+                  }
                 )}
               </div>
 
               <div className="flex flex-wrap gap-2 pt-2 border-t border-zinc-800/80">
                 <span className="text-xs text-zinc-400 self-center mr-2">Payment Status:</span>
-                {(['UNPAID', 'PENDING', 'PAID', 'REFUNDED'] as PaymentStatus[]).map((pst) => (
-                  <Button
-                    key={pst}
-                    size="sm"
-                    variant={selectedOrder.paymentStatus === pst ? 'primary' : 'outline'}
-                    disabled={updating || selectedOrder.paymentStatus === pst}
-                    onClick={() => handleUpdatePayment(pst)}
-                    className="text-xs"
-                  >
-                    {pst}
-                  </Button>
-                ))}
+                {(['UNPAID', 'PENDING', 'PAID', 'REFUNDED'] as PaymentStatus[]).map((pst) => {
+                  const isAllowed = isValidPaymentTransition(selectedOrder.paymentStatus, pst);
+                  return (
+                    <Button
+                      key={pst}
+                      size="sm"
+                      variant={selectedOrder.paymentStatus === pst ? 'primary' : 'outline'}
+                      disabled={updating || selectedOrder.paymentStatus === pst || !isAllowed}
+                      onClick={() => handleUpdatePayment(pst)}
+                      className="text-xs"
+                      title={!isAllowed ? `Payment transition from ${selectedOrder.paymentStatus} to ${pst} is not permitted.` : undefined}
+                    >
+                      {pst}
+                    </Button>
+                  );
+                })}
               </div>
 
               {/* Shipping Status & Fee Governance */}
-              <div className="pt-2 border-t border-zinc-800/80 space-y-2">
-                <div className="flex flex-wrap items-center gap-2">
-                  <span className="text-xs text-zinc-400 mr-2">Shipping Governance:</span>
-                  <Button
-                    size="sm"
-                    variant={selectedOrder.shippingStatus === 'NEGOTIATION_REQUIRED' ? 'primary' : 'outline'}
-                    disabled={updating || selectedOrder.shippingStatus === 'NEGOTIATION_REQUIRED'}
-                    onClick={() => handleUpdateShipping('NEGOTIATION_REQUIRED')}
-                    className="text-xs"
-                  >
-                    Negotiation Required (0 DZD)
-                  </Button>
-                  <Button
-                    size="sm"
-                    variant={selectedOrder.shippingStatus === 'FREE' ? 'primary' : 'outline'}
-                    disabled={updating || selectedOrder.shippingStatus === 'FREE'}
-                    onClick={() => handleUpdateShipping('FREE')}
-                    className="text-xs"
-                  >
-                    Free Delivery (0 DZD)
-                  </Button>
-                </div>
+              <div className="pt-2 border-t border-zinc-800/80 space-y-3">
+                {selectedOrder.status === 'CANCELLED' || selectedOrder.status === 'DELIVERED' ? (
+                  <div className="p-2.5 bg-zinc-900/80 border border-zinc-700/60 rounded-lg text-xs text-zinc-400 flex items-center gap-2">
+                    <AlertCircle className="w-4 h-4 text-zinc-500 shrink-0" />
+                    <span>Shipping is locked because order is in terminal state (<strong>{selectedOrder.status}</strong>).</span>
+                  </div>
+                ) : isOrderBundle(selectedOrder) ? (
+                  <div className="p-2.5 bg-emerald-950/30 border border-emerald-800/50 rounded-lg text-xs text-emerald-300 flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                      <Truck className="w-4 h-4 text-emerald-400 shrink-0" />
+                      <span><strong>ZIRON 3-Month Complete Program Bundle</strong> — Protected Free Shipping (0 DZD). Paid shipping cannot be assigned.</span>
+                    </div>
+                    <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-emerald-900 text-emerald-200">LOCKED FREE</span>
+                  </div>
+                ) : (
+                  <>
+                    <div className="flex flex-wrap items-center gap-2">
+                      <span className="text-xs text-zinc-400 mr-2">Shipping Governance:</span>
+                      <Button
+                        size="sm"
+                        variant={selectedOrder.shippingStatus === 'NEGOTIATION_REQUIRED' ? 'primary' : 'outline'}
+                        disabled={updating || selectedOrder.shippingStatus === 'NEGOTIATION_REQUIRED'}
+                        onClick={() => handleUpdateShipping('NEGOTIATION_REQUIRED')}
+                        className="text-xs"
+                      >
+                        Negotiation Required (0 DZD)
+                      </Button>
+                      <Button
+                        size="sm"
+                        variant={selectedOrder.shippingStatus === 'FREE' ? 'primary' : 'outline'}
+                        disabled={updating || selectedOrder.shippingStatus === 'FREE'}
+                        onClick={() => handleUpdateShipping('FREE')}
+                        className="text-xs"
+                      >
+                        Free Delivery (0 DZD)
+                      </Button>
+                    </div>
 
-                <div className="flex items-center gap-2 pt-1">
-                  <span className="text-xs text-zinc-400">Agreed Shipping Fee:</span>
-                  <input
-                    type="number"
-                    min="0"
-                    step="50"
-                    value={agreedShippingCost}
-                    onChange={(e) => setAgreedShippingCost(Math.max(0, parseInt(e.target.value, 10) || 0))}
-                    className="w-28 px-2 py-1 bg-zinc-900 border border-zinc-800 rounded text-xs text-white"
-                  />
-                  <span className="text-xs text-zinc-500">DZD</span>
-                  <Button
-                    size="sm"
-                    variant={selectedOrder.shippingStatus === 'AGREED_WITH_CUSTOMER' ? 'primary' : 'outline'}
-                    disabled={updating}
-                    onClick={() => handleUpdateShipping('AGREED_WITH_CUSTOMER')}
-                    className="text-xs"
-                  >
-                    Set Agreed Shipping
-                  </Button>
-                </div>
+                    <div className="flex flex-wrap items-center gap-2 pt-1">
+                      <span className="text-xs text-zinc-400">Agreed Shipping Fee:</span>
+                      <input
+                        type="number"
+                        min="0"
+                        step="50"
+                        value={agreedShippingCost}
+                        onChange={(e) => setAgreedShippingCost(Math.max(0, parseInt(e.target.value, 10) || 0))}
+                        className="w-24 px-2 py-1 bg-zinc-900 border border-zinc-800 rounded text-xs text-white"
+                      />
+                      <span className="text-xs text-zinc-500">DZD</span>
+                      <Button
+                        size="sm"
+                        variant={selectedOrder.shippingStatus === 'AGREED_WITH_CUSTOMER' ? 'primary' : 'outline'}
+                        disabled={updating}
+                        onClick={() => handleUpdateShipping('AGREED_WITH_CUSTOMER')}
+                        className="text-xs"
+                      >
+                        Set Agreed Shipping
+                      </Button>
+                      <span className="text-xs text-zinc-400 ml-auto">
+                        Projected Total: <strong className="text-emerald-400 font-mono">{formatDzdPrice(selectedOrder.subtotal + agreedShippingCost - selectedOrder.discounts)}</strong>
+                      </span>
+                    </div>
+                  </>
+                )}
               </div>
             </div>
 

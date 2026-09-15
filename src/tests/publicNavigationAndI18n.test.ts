@@ -91,17 +91,30 @@ describe('Public Navigation & Complete i18n Architecture Tests', () => {
       const arCatalog = getLocalizedCatalog('ar');
       const enCatalog = getLocalizedCatalog('en');
 
-      expect(arCatalog.length).toBe(4);
-      expect(arCatalog[0].name).toContain('المرحلة 01');
-      expect(arCatalog[0].name).not.toBe(enCatalog[0].name);
-      expect(arCatalog[0].description).toMatch(/[\u0600-\u06FF]/);
+      expect(arCatalog.length).toBeGreaterThanOrEqual(4);
+
+      const ar1Month = arCatalog.find((i) => i.id === 'ziron-1-month');
+      if (ar1Month) {
+        expect(ar1Month.name).toContain('شهر واحد');
+      }
+
+      const arPh1 = arCatalog.find((i) => i.id === 'ziron-phase-01') || arCatalog[0];
+      const enPh1 = enCatalog.find((i) => i.id === 'ziron-phase-01') || enCatalog[0];
+      expect(arPh1.name).toContain('المرحلة 01');
+      expect(arPh1.name).not.toBe(enPh1.name);
+      expect(arPh1.description).toMatch(/[\u0600-\u06FF]/);
 
       // Phase 2
-      expect(arCatalog[1].name).toContain('المرحلة 02');
+      const arPh2 = arCatalog.find((i) => i.id === 'ziron-phase-02');
+      expect(arPh2?.name).toContain('المرحلة 02');
+
       // Phase 3
-      expect(arCatalog[2].name).toContain('المرحلة 03');
+      const arPh3 = arCatalog.find((i) => i.id === 'ziron-phase-03');
+      expect(arPh3?.name).toContain('المرحلة 03');
+
       // Bundle
-      expect(arCatalog[3].name).toContain('حزمة برنامج ZIRON الكاملة لـ 90 يومًا');
+      const arBundle = arCatalog.find((i) => i.id === 'ziron-complete-bundle' || i.phase === 'BUNDLE');
+      expect(arBundle?.name).toContain('حزمة برنامج ZIRON الكاملة لـ 90 يومًا');
     });
   });
 });

@@ -16,6 +16,19 @@ export type { PublicCatalogItem };
  */
 export const ZIRON_CATALOG: PublicCatalogItem[] = [
   {
+    id: 'ziron-1-month',
+    sku: 'ZR-1M-30C',
+    phase: 1,
+    name: 'ZIRON 1 Month',
+    capsuleCount: 30,
+    supplyDays: 30,
+    priceDzd: 8000,
+    description: 'Authentic 30-capsule monthly container engineered for structured 30-day biological protocol adherence. Available across all 58 Algerian wilayas.',
+    badgeText: 'CANONICAL 1-MONTH CONTAINER',
+    containerColorHex: '#0B2346',
+    colorName: 'CANONICAL NAVY',
+  },
+  {
     id: 'ziron-phase-01',
     sku: 'ZR-PH01-30C',
     phase: 1,
@@ -87,33 +100,48 @@ export function formatDzdPrice(priceDzd: number | null, locale: Locale = 'en'): 
  * Returns catalog items localized for the active locale.
  */
 export function getLocalizedCatalog(locale: Locale = 'en'): PublicCatalogItem[] {
+  const findItem = (id: string) => ZIRON_CATALOG.find((it) => it.id === id) || ZIRON_CATALOG[0];
+
+  const canonical1m = findItem('ziron-1-month');
+  const ph01 = findItem('ziron-phase-01');
+  const ph02 = findItem('ziron-phase-02');
+  const ph03 = findItem('ziron-phase-03');
+  const bundle = findItem('ziron-complete-bundle');
+
   if (locale === 'ar') {
     return [
       {
-        ...ZIRON_CATALOG[0],
+        ...canonical1m,
+        name: 'ZIRON شهر واحد',
+        description: 'عبوة التركيبة التغذوية للشهر الواحد (30 كبسولة) للالتزام المنضبط ببرنامج الـ 30 يومًا، تشمل كود التحقق المشفر.',
+        badgeText: 'عبوة شهر واحد (30 كبسولة)',
+        colorName: 'كحلي كلاسيكي',
+      },
+      {
+        ...ph01,
         name: 'ZIRON المرحلة 01',
         description: 'عبوة التركيبة التغذوية للمرحلة 01 صُممت لروتين أول 30 يومًا من البرنامج لتأسيس الانضباط الصباحي.',
         badgeText: 'المرحلة 01 — مرحلة البرنامج',
         colorName: 'قرمزي',
       },
       {
-        ...ZIRON_CATALOG[1],
+        ...ph02,
         name: 'ZIRON المرحلة 02',
         description: 'عبوة التركيبة التغذوية للمرحلة 02 صُممت للأيام من 31 إلى 60 لتعزيز الاستمرارية وترسيخ العادات.',
         badgeText: 'المرحلة 02 — مرحلة البرنامج',
         colorName: 'كهرماني',
       },
       {
-        ...ZIRON_CATALOG[2],
+        ...ph03,
         name: 'ZIRON المرحلة 03',
         description: 'عبوة التركيبة التغذوية للمرحلة 03 صُممت للأيام من 61 إلى 90 لتثبيت استقلالية العادات الصحية على المدى الطويل.',
         badgeText: 'المرحلة 03 — مرحلة البرنامج',
         colorName: 'زمردي',
       },
       {
-        ...ZIRON_CATALOG[3],
+        ...bundle,
         name: 'حزمة برنامج ZIRON الكاملة لـ 90 يومًا',
-        description: 'طقم بروتوكول متكامل يضم العبوات الثلاث (المرحلة 01، المرحلة 02، والمرحلة 03) بإجمالي 90 كبسولة لرحلة الـ 90 يومًا كاملة.',
+        description: 'طقم بروتوكول متكامل يضم العبوات الثلاث (المرحلة 01، المرحلة 02، والمرحلة 03) بإجمالي 90 كبسولة لرحلة الـ 90 يومًا كاملة مع شحن مجاني متضمن.',
         badgeText: 'حزمة بروتوكول الـ 90 يومًا الكاملة',
         colorName: 'أزرق ملكي ثلاثي المراحل',
       },
@@ -123,30 +151,37 @@ export function getLocalizedCatalog(locale: Locale = 'en'): PublicCatalogItem[] 
   if (locale === 'fr') {
     return [
       {
-        ...ZIRON_CATALOG[0],
+        ...canonical1m,
+        name: 'ZIRON 1 Mois',
+        description: 'Flacon mensuel authentique de 30 gélules conçu pour un protocole structuré de 30 jours, avec code de vérification cryptographique.',
+        badgeText: 'FLACON 1 MOIS (30 GÉLULES)',
+        colorName: 'BLEU MARINE CANONIQUE',
+      },
+      {
+        ...ph01,
         name: 'ZIRON Phase 01',
         description: 'Flacon de formulation nutritionnelle Phase 01 conçu pour la période initiale de 30 jours du programme.',
         badgeText: 'PHASE 01 — PROGRAMME',
         colorName: 'POURPRE',
       },
       {
-        ...ZIRON_CATALOG[1],
+        ...ph02,
         name: 'ZIRON Phase 02',
         description: 'Flacon de formulation nutritionnelle Phase 02 conçu pour la période intermédiaire de 30 jours (jours 31 à 60).',
         badgeText: 'PHASE 02 — PROGRAMME',
         colorName: 'AMBRE',
       },
       {
-        ...ZIRON_CATALOG[2],
+        ...ph03,
         name: 'ZIRON Phase 03',
         description: 'Flacon de formulation nutritionnelle Phase 03 conçu pour la phase finale de 30 jours (jours 61 à 90).',
         badgeText: 'PHASE 03 — PROGRAMME',
         colorName: 'ÉMERAUDE',
       },
       {
-        ...ZIRON_CATALOG[3],
+        ...bundle,
         name: 'Pack Complet 90 Jours ZIRON',
-        description: 'Kit complet articulé en 3 phases comprenant les 3 flacons de 30 gélules (Phase 01, Phase 02 et Phase 03) totalisant 90 gélules.',
+        description: 'Kit complet articulé en 3 phases comprenant les 3 flacons de 30 gélules (Phase 01, Phase 02 et Phase 03) totalisant 90 gélules avec livraison gratuite incluse.',
         badgeText: 'PACK COMPLET PROTOCOLE 90 JOURS',
         colorName: 'BLEU MARINE TRI-PHASE',
       },

@@ -25,7 +25,7 @@ export const ShopPage: React.FC = () => {
   const s = t.shop;
 
   const catalog = getLocalizedCatalog(locale);
-  const phaseItems = catalog.filter((item) => item.phase !== 'BUNDLE');
+  const stageItems = catalog.filter((item) => typeof item.phase === 'number' && item.id !== 'ziron-1-month');
   const bundleItem = catalog.find((item) => item.phase === 'BUNDLE');
 
   const [selectedProduct, setSelectedProduct] = useState<CatalogItem | null>(null);
@@ -193,9 +193,14 @@ export const ShopPage: React.FC = () => {
         {/* SECTION 3: INDIVIDUAL 30-DAY CONTAINERS */}
         <section className="space-y-6">
           <div>
-            <span className="text-[10px] font-mono uppercase tracking-widest text-[#0B2346] font-bold block mb-1">
-              {locale === 'ar' ? 'التزويد الفردي للمراحل' : locale === 'fr' ? 'RÉAPPROVISIONNEMENT PAR PHASE' : 'INDIVIDUAL REPLENISHMENT'}
-            </span>
+            <div className="flex flex-wrap items-center justify-between gap-2 mb-1">
+              <span className="text-[10px] font-mono uppercase tracking-widest text-[#0B2346] font-bold block">
+                {locale === 'ar' ? 'ZIRON شهر واحد (30 كبسولة)' : locale === 'fr' ? 'ZIRON 1 MOIS (30 GÉLULES)' : 'ZIRON 1 MONTH (30 CAPSULES)'}
+              </span>
+              <span className="text-xs font-mono font-bold text-amber-800 bg-amber-50 border border-amber-200 px-2 py-0.5 rounded">
+                {locale === 'ar' ? 'السعر: 8,000 د.ج • الشحن يُتفق عليه مع العميل' : locale === 'fr' ? 'Prix : 8 000 DZD • Livraison convenue avec le client' : 'Price: 8,000 DZD • Shipping agreed with customer'}
+              </span>
+            </div>
             <h2 className="text-2xl sm:text-3xl font-black text-[#0B2346] tracking-tight">
               {s.individualSectionTitle}
             </h2>
@@ -205,7 +210,7 @@ export const ShopPage: React.FC = () => {
           </div>
 
           <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-            {phaseItems.map((item) => (
+            {stageItems.map((item) => (
               <Card
                 key={item.id}
                 variant="default"

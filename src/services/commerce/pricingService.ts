@@ -49,6 +49,12 @@ export function validateOrderTransition(currentStatus: OrderStatus, targetStatus
   }
 }
 
+export function isValidOrderTransition(currentStatus: OrderStatus, targetStatus: OrderStatus): boolean {
+  if (currentStatus === targetStatus) return false;
+  const allowed = VALID_ORDER_TRANSITIONS[currentStatus] || [];
+  return allowed.includes(targetStatus);
+}
+
 export function validatePaymentTransition(currentStatus: PaymentStatus, targetStatus: PaymentStatus): void {
   if (currentStatus === targetStatus) return;
   const allowed = VALID_PAYMENT_TRANSITIONS[currentStatus] || [];
@@ -59,6 +65,12 @@ export function validatePaymentTransition(currentStatus: PaymentStatus, targetSt
       }.`
     );
   }
+}
+
+export function isValidPaymentTransition(currentStatus: PaymentStatus, targetStatus: PaymentStatus): boolean {
+  if (currentStatus === targetStatus) return false;
+  const allowed = VALID_PAYMENT_TRANSITIONS[currentStatus] || [];
+  return allowed.includes(targetStatus);
 }
 
 /**

@@ -5185,22 +5185,20 @@ export const updateCommerceInventory = functions.https.onCall(async (data, conte
     const snap = await transaction.get(invRef);
     const now = new Date().toISOString();
 
-    let available = 100;
-    let reserved = 0;
-    let sold = 0;
-    let threshold = 10;
-    let productId = 'ziron-phase-01';
-    let sku = 'ZR-PH01-30C';
-
-    if (snap.exists) {
-      const d = snap.data()!;
-      available = d.availableQuantity ?? 100;
-      reserved = d.reservedQuantity ?? 0;
-      sold = d.soldQuantity ?? 0;
-      threshold = d.lowStockThreshold ?? 10;
-      productId = d.productId || productId;
-      sku = d.sku || sku;
+    if (!snap.exists) {
+      throw new functions.https.HttpsError(
+        'not-found',
+        `Inventory record "${invId}" does not exist. Create an explicit inventory record first.`
+      );
     }
+
+    const d = snap.data()!;
+    const available = d.availableQuantity ?? 0;
+    const reserved = d.reservedQuantity ?? 0;
+    const sold = d.soldQuantity ?? 0;
+    const threshold = d.lowStockThreshold ?? 10;
+    const productId = d.productId || '';
+    const sku = d.sku || '';
 
     const newAvailable = Math.max(0, available + adjustment);
     const newStatus =
@@ -5360,10 +5358,12 @@ export const createCustomerOrder = functions.https.onCall(async (data, context) 
 
   // 4. Run Atomic Transaction for Idempotency, Stock Verification, Pricing, and Creation
   const orderResult = await db.runTransaction(async (transaction) => {
-    // ATOMIC IDEMPOTENCY CHECK
+    // ATOMIC IDEMPOTENCY CHECK (Scoped by callerUid to prevent cross-user key collision)
     let idempDocRef: admin.firestore.DocumentReference | null = null;
+    let scopedIdempId: string | null = null;
     if (trimmedIdempotencyKey) {
-      idempDocRef = db.collection('idempotencyRecords').doc(trimmedIdempotencyKey);
+      scopedIdempId = `${callerUid}_${trimmedIdempotencyKey}`;
+      idempDocRef = db.collection('idempotencyRecords').doc(scopedIdempId);
       const idempSnap = await transaction.get(idempDocRef);
       if (idempSnap.exists) {
         const existingOrderId = idempSnap.data()?.orderId;
@@ -5375,6 +5375,23 @@ export const createCustomerOrder = functions.https.onCall(async (data, context) 
               isDuplicate: true,
               order: { id: existingOrderSnap.id, ...existingOrderSnap.data() },
             };
+          }
+        }
+      } else {
+        // Fallback for legacy unscoped records created by this user
+        const legacyDocRef = db.collection('idempotencyRecords').doc(trimmedIdempotencyKey);
+        const legacySnap = await transaction.get(legacyDocRef);
+        if (legacySnap.exists && legacySnap.data()?.userId === callerUid) {
+          const existingOrderId = legacySnap.data()?.orderId;
+          if (existingOrderId) {
+            const existingOrderDocRef = db.collection('orders').doc(existingOrderId);
+            const existingOrderSnap = await transaction.get(existingOrderDocRef);
+            if (existingOrderSnap.exists) {
+              return {
+                isDuplicate: true,
+                order: { id: existingOrderSnap.id, ...existingOrderSnap.data() },
+              };
+            }
           }
         }
       }
@@ -5580,9 +5597,10 @@ export const createCustomerOrder = functions.https.onCall(async (data, context) 
     transaction.set(orderRef, orderData);
 
     // Save idempotency record atomically inside same transaction
-    if (idempDocRef && trimmedIdempotencyKey) {
+    if (idempDocRef && scopedIdempId && trimmedIdempotencyKey) {
       transaction.set(idempDocRef, {
-        id: trimmedIdempotencyKey,
+        id: scopedIdempId,
+        idempotencyKey: trimmedIdempotencyKey,
         orderId: orderRef.id,
         userId: callerUid,
         createdAt: now,
@@ -6041,6 +6059,30 @@ export const updateOrderShipping = functions.https.onCall(async (data, context) 
       throw new functions.https.HttpsError(
         'failed-precondition',
         `Cannot modify shipping for order in ${currentOrder.status} state.`
+      );
+    }
+
+    // SECTION 15: THREE-MONTH BUNDLE PROTECTION (Must always remain FREE shipping / 0 DZD)
+    const isBundleOrder =
+      Array.isArray(currentOrder.items) &&
+      currentOrder.items.length > 0 &&
+      currentOrder.items.every((it: any) => {
+        const sku = (it.sku || '').toUpperCase();
+        const vid = (it.variantId || '').toUpperCase();
+        return (
+          sku === 'ZR-BNDL-90C' ||
+          sku === 'ZR-3M-90C' ||
+          sku.includes('BNDL') ||
+          sku.includes('3M') ||
+          vid.includes('BUNDLE') ||
+          vid.includes('3M')
+        );
+      });
+
+    if (isBundleOrder && (shippingStatus !== 'FREE' || finalShippingCost > 0)) {
+      throw new functions.https.HttpsError(
+        'failed-precondition',
+        'ZIRON 3-Month Complete Program Bundle is strictly protected with Free Shipping. Cannot assign paid shipping.'
       );
     }
 
