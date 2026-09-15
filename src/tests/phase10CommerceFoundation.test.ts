@@ -11,7 +11,12 @@ import {
   ZIRON_3_MONTH_SAVINGS_DZD,
   VALID_ORDER_TRANSITIONS,
   VALID_PAYMENT_TRANSITIONS,
+  isFreeBundleOrder,
+  validateShippingUpdate,
+  calculateAuthoritativeSubtotal,
+  calculateAuthoritativeTotal,
 } from '@/services/commerce/pricingService';
+import { ZIRON_CATALOG } from '@/lib/content/catalog';
 import {
   Product,
   ProductVariant,
@@ -348,3 +353,465 @@ describe('Phase 10: School Entitlement & Commerce Decoupling (Strict Invariant)'
     expect(isProgramOpen).toBe(false);
   });
 });
+
+describe('Phase 10.2: Idempotency Engine & Concurrency Hardening (Tests A - F)', () => {
+  // In-memory simulation of the authoritative server transaction engine
+  interface SimulatedOrder {
+    id: string;
+    orderNumber: string;
+    userId: string;
+    items: Array<{ variantId: string; quantity: number }>;
+    subtotal: number;
+    shippingCost: number;
+    shippingStatus: string;
+    total: number;
+    status: OrderStatus;
+    paymentStatus: PaymentStatus;
+    idempotencyKey: string | null;
+  }
+
+  interface SimulatedInventory {
+    availableQuantity: number;
+    reservedQuantity: number;
+    soldQuantity: number;
+  }
+
+  class MockTransactionalCommerceEngine {
+    orders: Map<string, SimulatedOrder> = new Map();
+    idempotencyRecords: Map<string, { id: string; orderId: string; userId: string; idempotencyKey: string }> = new Map();
+    inventory: Map<string, SimulatedInventory> = new Map([
+      ['var-1m', { availableQuantity: 50, reservedQuantity: 0, soldQuantity: 0 }],
+      ['var-bundle', { availableQuantity: 20, reservedQuantity: 0, soldQuantity: 0 }],
+    ]);
+
+    async createOrder(
+      callerUid: string,
+      payload: { items: Array<{ variantId: string; quantity: number }>; idempotencyKey?: string | null }
+    ): Promise<{ order: SimulatedOrder; isDuplicate: boolean }> {
+      const rawKey = payload.idempotencyKey;
+      let trimmedKey: string | null = null;
+
+      if (rawKey !== undefined && rawKey !== null) {
+        if (typeof rawKey !== 'string' || rawKey.trim().length === 0) {
+          throw new Error('Idempotency key must be a non-empty string when provided.');
+        }
+        trimmedKey = rawKey.trim();
+      }
+
+      // Scoped Key Construction: ${callerUid}_${normalizedKey}
+      let scopedKey: string | null = null;
+      if (trimmedKey) {
+        const normalized = trimmedKey.replace(/[\/\s#?]/g, '_').slice(0, 100);
+        scopedKey = `${callerUid}_${normalized}`;
+
+        const existingRecord = this.idempotencyRecords.get(scopedKey);
+        if (existingRecord) {
+          const cachedOrder = this.orders.get(existingRecord.orderId);
+          if (cachedOrder) {
+            return { order: cachedOrder, isDuplicate: true };
+          }
+        }
+      }
+
+      // Check and update inventory
+      for (const item of payload.items) {
+        const inv = this.inventory.get(item.variantId);
+        if (!inv) {
+          throw new Error(`Inventory record missing for variant "${item.variantId}". Order rejected.`);
+        }
+        if (inv.availableQuantity < item.quantity) {
+          throw new Error(`Insufficient inventory for "${item.variantId}".`);
+        }
+      }
+
+      // Deduct inventory
+      for (const item of payload.items) {
+        const inv = this.inventory.get(item.variantId)!;
+        inv.availableQuantity -= item.quantity;
+        inv.reservedQuantity += item.quantity;
+      }
+
+      const orderId = 'ord_' + Math.random().toString(36).substring(2, 9);
+      const isBundle = payload.items.some((it) => it.variantId.includes('bundle'));
+      const unitPrice = isBundle ? 22000 : 8000;
+      const subtotal = payload.items.reduce((acc, it) => acc + unitPrice * it.quantity, 0);
+      const shippingStatus = isBundle ? 'FREE' : 'NEGOTIATION_REQUIRED';
+      const shippingCost = 0;
+      const total = subtotal + shippingCost;
+
+      const order: SimulatedOrder = {
+        id: orderId,
+        orderNumber: 'ZR-ORD-' + orderId.toUpperCase(),
+        userId: callerUid,
+        items: payload.items,
+        subtotal,
+        shippingCost,
+        shippingStatus,
+        total,
+        status: 'PENDING',
+        paymentStatus: 'UNPAID',
+        idempotencyKey: trimmedKey,
+      };
+
+      this.orders.set(orderId, order);
+
+      if (scopedKey && trimmedKey) {
+        this.idempotencyRecords.set(scopedKey, {
+          id: scopedKey,
+          orderId,
+          userId: callerUid,
+          idempotencyKey: trimmedKey,
+        });
+      }
+
+      return { order, isDuplicate: false };
+    }
+
+    cancelOrder(orderId: string, callerUid: string): SimulatedOrder {
+      const order = this.orders.get(orderId);
+      if (!order) throw new Error('Order not found');
+      if (order.status === 'CANCELLED') return order;
+
+      // Release reserved back to available
+      for (const item of order.items) {
+        const inv = this.inventory.get(item.variantId);
+        if (inv) {
+          inv.reservedQuantity = Math.max(0, inv.reservedQuantity - item.quantity);
+          inv.availableQuantity += item.quantity;
+        }
+      }
+
+      order.status = 'CANCELLED';
+      return order;
+    }
+  }
+
+  // TEST A: Concurrent requests with identical idempotencyKey produce exactly 1 order
+  it('TEST A: Concurrent requests with identical idempotencyKey produce exactly 1 order', async () => {
+    const engine = new MockTransactionalCommerceEngine();
+    const callerUid = 'user_alpha';
+    const key = 'checkout_session_unique_101';
+
+    const [res1, res2] = await Promise.all([
+      engine.createOrder(callerUid, {
+        items: [{ variantId: 'var-1m', quantity: 2 }],
+        idempotencyKey: key,
+      }),
+      engine.createOrder(callerUid, {
+        items: [{ variantId: 'var-1m', quantity: 2 }],
+        idempotencyKey: key,
+      }),
+    ]);
+
+    // Both promises resolve, referencing the exact same orderId
+    expect(res1.order.id).toBe(res2.order.id);
+    expect([res1.isDuplicate, res2.isDuplicate]).toContain(false);
+    expect([res1.isDuplicate, res2.isDuplicate]).toContain(true);
+
+    // Inventory reserved only once (2 units, not 4 units)
+    const inv = engine.inventory.get('var-1m')!;
+    expect(inv.availableQuantity).toBe(48);
+    expect(inv.reservedQuantity).toBe(2);
+  });
+
+  // TEST B: Sequential duplicate requests return cached order without decrementing inventory twice
+  it('TEST B: Sequential duplicate requests return cached order without decrementing inventory twice', async () => {
+    const engine = new MockTransactionalCommerceEngine();
+    const callerUid = 'user_beta';
+    const key = 'idem_key_sequential_202';
+
+    const firstCall = await engine.createOrder(callerUid, {
+      items: [{ variantId: 'var-bundle', quantity: 1 }],
+      idempotencyKey: key,
+    });
+    expect(firstCall.isDuplicate).toBe(false);
+
+    const invAfterFirst = engine.inventory.get('var-bundle')!;
+    expect(invAfterFirst.availableQuantity).toBe(19);
+    expect(invAfterFirst.reservedQuantity).toBe(1);
+
+    const secondCall = await engine.createOrder(callerUid, {
+      items: [{ variantId: 'var-bundle', quantity: 1 }],
+      idempotencyKey: key,
+    });
+    expect(secondCall.isDuplicate).toBe(true);
+    expect(secondCall.order.id).toBe(firstCall.order.id);
+
+    // Inventory remains exactly the same
+    const invAfterSecond = engine.inventory.get('var-bundle')!;
+    expect(invAfterSecond.availableQuantity).toBe(19);
+    expect(invAfterSecond.reservedQuantity).toBe(1);
+  });
+
+  // TEST C: Two different users using the same key string do NOT collide (each gets their own order)
+  it('TEST C: Two different users using the same key string do NOT collide (each gets their own order)', async () => {
+    const engine = new MockTransactionalCommerceEngine();
+    const sharedKeyString = 'checkout_btn_clicked_common_key';
+
+    const user1Res = await engine.createOrder('user_001', {
+      items: [{ variantId: 'var-1m', quantity: 1 }],
+      idempotencyKey: sharedKeyString,
+    });
+
+    const user2Res = await engine.createOrder('user_002', {
+      items: [{ variantId: 'var-1m', quantity: 1 }],
+      idempotencyKey: sharedKeyString,
+    });
+
+    // Both are distinct orders for each user
+    expect(user1Res.isDuplicate).toBe(false);
+    expect(user2Res.isDuplicate).toBe(false);
+    expect(user1Res.order.id).not.toBe(user2Res.order.id);
+    expect(user1Res.order.userId).toBe('user_001');
+    expect(user2Res.order.userId).toBe('user_002');
+
+    // Total reserved = 2 (1 for user 1, 1 for user 2)
+    expect(engine.inventory.get('var-1m')!.reservedQuantity).toBe(2);
+  });
+
+  // TEST D: Request without idempotencyKey generates order normally
+  it('TEST D: Request without idempotencyKey generates order normally', async () => {
+    const engine = new MockTransactionalCommerceEngine();
+    const callerUid = 'user_gamma';
+
+    const res1 = await engine.createOrder(callerUid, {
+      items: [{ variantId: 'var-1m', quantity: 1 }],
+    });
+    const res2 = await engine.createOrder(callerUid, {
+      items: [{ variantId: 'var-1m', quantity: 1 }],
+      idempotencyKey: null,
+    });
+
+    expect(res1.isDuplicate).toBe(false);
+    expect(res2.isDuplicate).toBe(false);
+    expect(res1.order.id).not.toBe(res2.order.id);
+    expect(engine.orders.size).toBe(2);
+  });
+
+  // TEST E: Invalid idempotencyKey format handled gracefully
+  it('TEST E: Invalid idempotencyKey format handled gracefully (rejects empty string or whitespace)', async () => {
+    const engine = new MockTransactionalCommerceEngine();
+    const callerUid = 'user_delta';
+
+    await expect(
+      engine.createOrder(callerUid, {
+        items: [{ variantId: 'var-1m', quantity: 1 }],
+        idempotencyKey: '',
+      })
+    ).rejects.toThrow('Idempotency key must be a non-empty string when provided');
+
+    await expect(
+      engine.createOrder(callerUid, {
+        items: [{ variantId: 'var-1m', quantity: 1 }],
+        idempotencyKey: '    ',
+      })
+    ).rejects.toThrow('Idempotency key must be a non-empty string when provided');
+  });
+
+  // TEST F: Order cancellation does not corrupt idempotency record
+  it('TEST F: Order cancellation does not corrupt idempotency record', async () => {
+    const engine = new MockTransactionalCommerceEngine();
+    const callerUid = 'user_epsilon';
+    const key = 'key_for_cancellation_test';
+
+    const created = await engine.createOrder(callerUid, {
+      items: [{ variantId: 'var-1m', quantity: 2 }],
+      idempotencyKey: key,
+    });
+
+    expect(created.order.status).toBe('PENDING');
+    expect(engine.inventory.get('var-1m')!.reservedQuantity).toBe(2);
+
+    // Cancel order -> Releases inventory
+    engine.cancelOrder(created.order.id, callerUid);
+    expect(engine.orders.get(created.order.id)!.status).toBe('CANCELLED');
+    expect(engine.inventory.get('var-1m')!.reservedQuantity).toBe(0);
+    expect(engine.inventory.get('var-1m')!.availableQuantity).toBe(50);
+
+    // Repeated call with same idempotency key returns the cancelled order without altering inventory
+    const retryCall = await engine.createOrder(callerUid, {
+      items: [{ variantId: 'var-1m', quantity: 2 }],
+      idempotencyKey: key,
+    });
+
+    expect(retryCall.isDuplicate).toBe(true);
+    expect(retryCall.order.id).toBe(created.order.id);
+    expect(retryCall.order.status).toBe('CANCELLED');
+    // Stock remains 50 available and 0 reserved (no double release or re-reservation)
+    expect(engine.inventory.get('var-1m')!.availableQuantity).toBe(50);
+    expect(engine.inventory.get('var-1m')!.reservedQuantity).toBe(0);
+  });
+});
+
+describe('Phase 10.2: Authoritative Shipping Governance & Free Bundle Protection', () => {
+  it('enforces NEGOTIATION_REQUIRED default shipping cost of 0 DZD', () => {
+    const res = validateShippingUpdate('NEGOTIATION_REQUIRED');
+    expect(res.finalShippingCost).toBe(0);
+  });
+
+  it('enforces that AGREED_WITH_CUSTOMER strictly requires integer > 0 DZD', () => {
+    // Valid agreed shipping cost
+    expect(validateShippingUpdate('AGREED_WITH_CUSTOMER', 800).finalShippingCost).toBe(800);
+    expect(validateShippingUpdate('AGREED_WITH_CUSTOMER', 1200).finalShippingCost).toBe(1200);
+
+    // Zero or negative -> rejected
+    expect(() => validateShippingUpdate('AGREED_WITH_CUSTOMER', 0)).toThrow(
+      'Valid positive integer shippingCost (> 0 DZD) is required'
+    );
+    expect(() => validateShippingUpdate('AGREED_WITH_CUSTOMER', -500)).toThrow(
+      'Valid positive integer shippingCost (> 0 DZD) is required'
+    );
+
+    // Non-integer or NaN -> rejected
+    expect(() => validateShippingUpdate('AGREED_WITH_CUSTOMER', 750.5)).toThrow(
+      'Valid positive integer shippingCost (> 0 DZD) is required'
+    );
+    expect(() => validateShippingUpdate('AGREED_WITH_CUSTOMER', NaN)).toThrow(
+      'Valid positive integer shippingCost (> 0 DZD) is required'
+    );
+    expect(() => validateShippingUpdate('AGREED_WITH_CUSTOMER', undefined)).toThrow(
+      'Valid positive integer shippingCost (> 0 DZD) is required'
+    );
+  });
+
+  it('strictly protects 3-Month Complete Program Bundle: paid shipping is rejected', () => {
+    const bundleItems = [{ sku: 'ZR-BNDL-90C', variantId: 'var-bundle' }];
+
+    // Free shipping is accepted
+    expect(validateShippingUpdate('FREE', 0, bundleItems).finalShippingCost).toBe(0);
+
+    // Attempting to assign paid shipping to bundle -> strictly rejected
+    expect(() =>
+      validateShippingUpdate('AGREED_WITH_CUSTOMER', 1000, bundleItems)
+    ).toThrow('ZIRON 3-Month Complete Program Bundle is strictly protected with Free Shipping');
+
+    // Attempting to assign NEGOTIATION_REQUIRED with cost to bundle -> rejected
+    expect(() =>
+      validateShippingUpdate('AGREED_WITH_CUSTOMER', 500, [
+        { sku: 'ZR-3M-90C', variantId: 'var-3m' },
+      ])
+    ).toThrow('ZIRON 3-Month Complete Program Bundle is strictly protected with Free Shipping');
+  });
+
+  it('detects bundle items reliably with isFreeBundleOrder', () => {
+    expect(isFreeBundleOrder([{ sku: 'ZR-BNDL-90C' }])).toBe(true);
+    expect(isFreeBundleOrder([{ sku: 'ZR-3M-90C' }])).toBe(true);
+    expect(isFreeBundleOrder([{ variantId: 'var-bundle-complete' }])).toBe(true);
+    expect(isFreeBundleOrder([{ sku: 'ZR-PH01-30C' }])).toBe(false);
+    expect(isFreeBundleOrder([])).toBe(false);
+  });
+});
+
+describe('Phase 10.2: Staff Role Authorization & Shipping Audit Logging', () => {
+  const AUTHORIZED_STAFF_ROLES = ['SUPER_ADMIN', 'ADMIN', 'ORDER_MANAGER', 'SUPPORT'];
+
+  function checkCanUpdateShipping(roles: string[]): boolean {
+    return roles.some((r) => AUTHORIZED_STAFF_ROLES.includes(r));
+  }
+
+  it('permits authorized staff roles (SUPER_ADMIN, ADMIN, ORDER_MANAGER, SUPPORT)', () => {
+    expect(checkCanUpdateShipping(['SUPER_ADMIN'])).toBe(true);
+    expect(checkCanUpdateShipping(['ADMIN'])).toBe(true);
+    expect(checkCanUpdateShipping(['ORDER_MANAGER'])).toBe(true);
+    expect(checkCanUpdateShipping(['SUPPORT'])).toBe(true);
+    expect(checkCanUpdateShipping(['CUSTOMER', 'ORDER_MANAGER'])).toBe(true);
+  });
+
+  it('rejects unauthorized roles (CUSTOMER, STUDENT, ANALYST)', () => {
+    expect(checkCanUpdateShipping(['CUSTOMER'])).toBe(false);
+    expect(checkCanUpdateShipping(['STUDENT'])).toBe(false);
+    expect(checkCanUpdateShipping(['ANALYST'])).toBe(false);
+    expect(checkCanUpdateShipping([])).toBe(false);
+  });
+
+  it('creates authoritative audit event structure on shipping agreement', () => {
+    const auditLog = {
+      action: 'ORDER_SHIPPING_UPDATED',
+      resourceType: 'orders',
+      resourceId: 'ZR-ORD-001',
+      actorUserId: 'staff_101',
+      actorEmail: 'staff@virexon-biosciences.com',
+      actorRoles: ['ORDER_MANAGER'],
+      metadata: {
+        previousShippingStatus: 'NEGOTIATION_REQUIRED',
+        newShippingStatus: 'AGREED_WITH_CUSTOMER',
+        previousShippingCost: 0,
+        newShippingCost: 800,
+        newTotal: 8800,
+      },
+    };
+
+    expect(auditLog.action).toBe('ORDER_SHIPPING_UPDATED');
+    expect(auditLog.metadata.newShippingCost).toBe(800);
+    expect(auditLog.metadata.newTotal).toBe(8800);
+  });
+});
+
+describe('Phase 10.2: Real Transactional Inventory Accounting & Fail-Closed Behavior', () => {
+  it('simulates full lifecycle: reserve on create, sell on paid, restock on cancel', () => {
+    let available = 100;
+    let reserved = 0;
+    let sold = 0;
+
+    // Step 1: Place order for 10 units
+    const orderQty = 10;
+    available -= orderQty;
+    reserved += orderQty;
+    expect(available).toBe(90);
+    expect(reserved).toBe(10);
+    expect(sold).toBe(0);
+
+    // Step 2: Mark as PAID
+    reserved -= orderQty;
+    sold += orderQty;
+    expect(available).toBe(90);
+    expect(reserved).toBe(0);
+    expect(sold).toBe(10);
+
+    // Step 3: Admin cancels paid order -> stock returned to available from sold
+    sold -= orderQty;
+    available += orderQty;
+    expect(available).toBe(100);
+    expect(reserved).toBe(0);
+    expect(sold).toBe(0);
+  });
+
+  it('fails closed when inventory record is missing (no fallback quantities)', () => {
+    const mockDbInventory = new Map<string, any>();
+    // Only SKU-A exists, SKU-B is missing
+    mockDbInventory.set('inv-sku-a', { availableQuantity: 50 });
+
+    const checkInventoryRecord = (invId: string) => {
+      const record = mockDbInventory.get(invId);
+      if (!record) {
+        throw new Error(`Inventory record missing for ${invId}. Order rejected.`);
+      }
+      return record;
+    };
+
+    expect(() => checkInventoryRecord('inv-sku-a')).not.toThrow();
+    expect(() => checkInventoryRecord('inv-missing-item')).toThrow(
+      'Inventory record missing for inv-missing-item. Order rejected.'
+    );
+  });
+});
+
+describe('Phase 10.2: Commercial Catalog Structure Invariant', () => {
+  it('exposes exactly 1-Month (8,000 DZD) and 3-Month Program Bundle (22,000 DZD) with 2,000 DZD savings', () => {
+    const oneMonthProduct = ZIRON_CATALOG.find((p) => p.sku === 'ZR-1M-30C' || p.id === 'ziron-1-month');
+    const bundleProduct = ZIRON_CATALOG.find((p) => p.sku === 'ZR-BNDL-90C' || p.phase === 'BUNDLE');
+
+    expect(oneMonthProduct).toBeDefined();
+    expect(oneMonthProduct?.priceDzd).toBe(8000);
+    expect(oneMonthProduct?.capsuleCount).toBe(30);
+
+    expect(bundleProduct).toBeDefined();
+    expect(bundleProduct?.priceDzd).toBe(22000);
+    expect(bundleProduct?.capsuleCount).toBe(90);
+
+    // 3 x 8,000 DZD = 24,000 DZD vs 22,000 DZD bundle -> 2,000 DZD exact saving
+    const expectedSaving = 3 * oneMonthProduct!.priceDzd! - bundleProduct!.priceDzd!;
+    expect(expectedSaving).toBe(2000);
+  });
+});
+

@@ -107,6 +107,75 @@ export function determineAuthoritativeShipping(
 }
 
 /**
+ * Checks if an order or collection of items contains a protected 3-Month Complete Program bundle.
+ */
+export function isFreeBundleOrder(
+  items: Array<{ sku?: string; variantId?: string; productId?: string }>
+): boolean {
+  if (!items || items.length === 0) return false;
+  return items.some((it) => {
+    const sku = (it.sku || '').toUpperCase();
+    const vid = (it.variantId || '').toUpperCase();
+    const pid = (it.productId || '').toUpperCase();
+    return (
+      sku === 'ZR-BNDL-90C' ||
+      sku === 'ZR-3M-90C' ||
+      sku.includes('BNDL') ||
+      sku.includes('3M') ||
+      vid.includes('BUNDLE') ||
+      vid.includes('3M') ||
+      pid.includes('BUNDLE') ||
+      pid.includes('3M')
+    );
+  });
+}
+
+/**
+ * Validates shipping updates per commercial governance rules.
+ * - AGREED_WITH_CUSTOMER requires strictly positive integer (> 0 DZD)
+ * - FREE bundle items cannot have paid shipping assigned
+ */
+export function validateShippingUpdate(
+  shippingStatus: ShippingStatus,
+  shippingCost?: number,
+  items?: Array<{ sku?: string; variantId?: string; productId?: string }>
+): { finalShippingCost: number } {
+  const validStatuses: ShippingStatus[] = ['NEGOTIATION_REQUIRED', 'AGREED_WITH_CUSTOMER', 'FREE'];
+  if (!shippingStatus || !validStatuses.includes(shippingStatus)) {
+    throw new Error(`Invalid shipping status. Allowed: ${validStatuses.join(', ')}`);
+  }
+
+  let finalCost = 0;
+  if (shippingStatus === 'FREE') {
+    finalCost = 0;
+  } else if (shippingStatus === 'NEGOTIATION_REQUIRED') {
+    finalCost = 0;
+  } else if (shippingStatus === 'AGREED_WITH_CUSTOMER') {
+    if (
+      typeof shippingCost !== 'number' ||
+      isNaN(shippingCost) ||
+      !Number.isInteger(shippingCost) ||
+      shippingCost <= 0
+    ) {
+      throw new Error(
+        'Valid positive integer shippingCost (> 0 DZD) is required when shipping status is AGREED_WITH_CUSTOMER.'
+      );
+    }
+    finalCost = Math.round(shippingCost);
+  }
+
+  if (items && isFreeBundleOrder(items)) {
+    if (shippingStatus !== 'FREE' || finalCost > 0) {
+      throw new Error(
+        'ZIRON 3-Month Complete Program Bundle is strictly protected with Free Shipping. Cannot assign paid shipping.'
+      );
+    }
+  }
+
+  return { finalShippingCost: finalCost };
+}
+
+/**
  * Validates that an amount is a positive, realistic DZD figure.
  */
 export function validatePriceAmount(amount: number): number {

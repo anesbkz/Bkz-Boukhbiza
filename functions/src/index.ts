@@ -4872,12 +4872,13 @@ async function assertCanManageOrders(
     isCallerSuperAdmin ||
     callerRoles.includes('ADMIN') ||
     callerRoles.includes('ORDER_MANAGER') ||
-    callerRoles.includes('PRODUCT_MANAGER');
+    callerRoles.includes('PRODUCT_MANAGER') ||
+    callerRoles.includes('SUPPORT');
 
   if (!isAuthorized) {
     throw new functions.https.HttpsError(
       'permission-denied',
-      'Caller lacks authority to manage orders (requires SUPER_ADMIN, ADMIN, or ORDER_MANAGER).'
+      'Caller lacks authority to manage orders (requires SUPER_ADMIN, ADMIN, ORDER_MANAGER, or SUPPORT).'
     );
   }
 
