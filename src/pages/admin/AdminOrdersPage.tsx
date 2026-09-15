@@ -123,16 +123,19 @@ export const AdminOrdersPage: React.FC = () => {
 
   const isOrderBundle = (order: Order | null): boolean => {
     if (!order || !Array.isArray(order.items) || order.items.length === 0) return false;
-    return order.items.every((it) => {
+    return order.items.some((it) => {
       const sku = (it.sku || '').toUpperCase();
       const vid = (it.variantId || '').toUpperCase();
+      const pid = (it.productId || '').toUpperCase();
       return (
         sku === 'ZR-BNDL-90C' ||
         sku === 'ZR-3M-90C' ||
         sku.includes('BNDL') ||
         sku.includes('3M') ||
         vid.includes('BUNDLE') ||
-        vid.includes('3M')
+        vid.includes('3M') ||
+        pid.includes('BUNDLE') ||
+        pid.includes('3M')
       );
     });
   };
@@ -143,6 +146,13 @@ export const AdminOrdersPage: React.FC = () => {
     if (selectedOrder.status === 'CANCELLED' || selectedOrder.status === 'DELIVERED') {
       setActionError(`Cannot modify shipping: order is already ${selectedOrder.status}.`);
       return;
+    }
+
+    if (newShippingStatus === 'AGREED_WITH_CUSTOMER') {
+      if (!Number.isInteger(agreedShippingCost) || agreedShippingCost <= 0) {
+        setActionError('Agreed shipping cost must be a positive integer greater than 0 DZD.');
+        return;
+      }
     }
 
     if (isOrderBundle(selectedOrder) && (newShippingStatus !== 'FREE' || agreedShippingCost > 0)) {
@@ -157,7 +167,7 @@ export const AdminOrdersPage: React.FC = () => {
         newShippingStatus === 'FREE'
           ? 0
           : newShippingStatus === 'AGREED_WITH_CUSTOMER'
-          ? Math.max(0, agreedShippingCost)
+          ? agreedShippingCost
           : 0;
 
       const res = await updateOrderShippingAdmin({

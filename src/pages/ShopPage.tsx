@@ -25,8 +25,9 @@ export const ShopPage: React.FC = () => {
   const s = t.shop;
 
   const catalog = getLocalizedCatalog(locale);
-  const stageItems = catalog.filter((item) => typeof item.phase === 'number' && item.id !== 'ziron-1-month');
+  const oneMonthItem = catalog.find((item) => item.id === 'ziron-1-month') || catalog[0];
   const bundleItem = catalog.find((item) => item.phase === 'BUNDLE');
+  const stagePhases = catalog.filter((item) => typeof item.phase === 'number' && item.id !== 'ziron-1-month');
 
   const [selectedProduct, setSelectedProduct] = useState<CatalogItem | null>(null);
   const [orderModalOpen, setOrderModalOpen] = useState<boolean>(false);
@@ -190,107 +191,83 @@ export const ShopPage: React.FC = () => {
           </section>
         )}
 
-        {/* SECTION 3: INDIVIDUAL 30-DAY CONTAINERS */}
+        {/* SECTION 3: PRODUCT A — ZIRON 1 MONTH */}
         <section className="space-y-6">
-          <div>
-            <div className="flex flex-wrap items-center justify-between gap-2 mb-1">
-              <span className="text-[10px] font-mono uppercase tracking-widest text-[#0B2346] font-bold block">
-                {locale === 'ar' ? 'ZIRON شهر واحد (30 كبسولة)' : locale === 'fr' ? 'ZIRON 1 MOIS (30 GÉLULES)' : 'ZIRON 1 MONTH (30 CAPSULES)'}
-              </span>
-              <span className="text-xs font-mono font-bold text-amber-800 bg-amber-50 border border-amber-200 px-2 py-0.5 rounded">
-                {locale === 'ar' ? 'السعر: 8,000 د.ج • الشحن يُتفق عليه مع العميل' : locale === 'fr' ? 'Prix : 8 000 DZD • Livraison convenue avec le client' : 'Price: 8,000 DZD • Shipping agreed with customer'}
-              </span>
-            </div>
-            <h2 className="text-2xl sm:text-3xl font-black text-[#0B2346] tracking-tight">
-              {s.individualSectionTitle}
-            </h2>
-            <p className="text-xs sm:text-sm text-gray-600 mt-1">
-              {s.individualSectionSubtitle}
-            </p>
-          </div>
-
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-            {stageItems.map((item) => (
-              <Card
-                key={item.id}
-                variant="default"
-                className="flex flex-col justify-between border-t-4"
-                style={{ borderTopColor: item.containerColorHex }}
-              >
-                <div className="space-y-4">
-                  <div className="flex items-center justify-between">
-                    <Badge variant="navy">{item.badgeText}</Badge>
-                    <span className="text-[11px] font-mono text-gray-400">{item.sku}</span>
-                  </div>
-
-                  <h3 className="text-xl font-bold text-[#0B2346]">{item.name}</h3>
-
-                  <div className="bg-[#F5F7FA] border border-[#E2E8F0] p-3 space-y-1.5 text-xs">
-                    <div className="flex items-center justify-between">
-                      <span className="text-gray-500 font-medium">
-                        {locale === 'ar' ? 'حجم العبوة:' : locale === 'fr' ? 'Volume de gélules :' : 'Capsule Volume:'}
-                      </span>
-                      <span className="font-bold text-[#0B2346]">
-                        {item.capsuleCount} {locale === 'ar' ? 'كبسولة' : locale === 'fr' ? 'gélules' : 'capsules'}
-                      </span>
-                    </div>
-                    <div className="flex items-center justify-between">
-                      <span className="text-gray-500 font-medium">
-                        {locale === 'ar' ? 'فترة الروتين:' : locale === 'fr' ? 'Durée de la phase :' : 'Routine Target:'}
-                      </span>
-                      <span className="font-bold text-[#0B2346]">
-                        {item.supplyDays} {locale === 'ar' ? 'يومًا' : locale === 'fr' ? 'jours' : 'days'}
-                      </span>
-                    </div>
-                    <div className="flex items-center justify-between pt-1.5 border-t border-gray-200">
-                      <span className="text-gray-500 font-medium">
-                        {locale === 'ar' ? 'السعر (د.ج):' : locale === 'fr' ? 'Prix (DZD) :' : 'Price (DZD):'}
-                      </span>
-                      <span className="font-bold font-mono text-[#0B2346] text-sm">
-                        {formatDzdPrice(item.priceDzd, locale)}
-                      </span>
-                    </div>
-                    <div className="flex items-center justify-between text-[11px] text-amber-700">
-                      <span>{locale === 'ar' ? 'الشحن:' : locale === 'fr' ? 'Livraison :' : 'Shipping:'}</span>
-                      <span className="font-medium">{locale === 'ar' ? 'يُتفق عليه حسب الولاية' : locale === 'fr' ? 'Convenu selon la wilaya' : 'Agreed based on wilaya'}</span>
-                    </div>
-                  </div>
-
-                  <p className="text-xs text-gray-600 leading-relaxed">
-                    {item.description}
-                  </p>
-
-                  <ul className="text-[11px] text-gray-600 space-y-1 pt-2 border-t border-gray-100">
-                    <li className="flex items-center gap-1.5">
-                      <Check className="w-3.5 h-3.5 text-emerald-600" />
-                      <span>{item.colorName} {locale === 'ar' ? 'شريط أمان ملون' : locale === 'fr' ? 'sceau inviolable' : 'tamper-evident seal'}</span>
-                    </li>
-                    <li className="flex items-center gap-1.5">
-                      <Check className="w-3.5 h-3.5 text-emerald-600" />
-                      <span>{locale === 'ar' ? 'رمز تسلسلي أمني مكون من 16 خانة' : locale === 'fr' ? 'Code sérialisé unique de 16 caractères' : 'Single serialized 16-character code'}</span>
-                    </li>
-                    <li className="flex items-center gap-1.5">
-                      <Check className="w-3.5 h-3.5 text-emerald-600" />
-                      <span>{locale === 'ar' ? 'صلاحية رقمية في منصة ZIRON' : locale === 'fr' ? 'Accès numérique à la plateforme ZIRON' : 'Digital ZIRON Hub phase access'}</span>
-                    </li>
-                  </ul>
+          <div className="bg-white border-2 border-slate-300 p-6 sm:p-10 shadow-sm relative">
+            <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-8">
+              <div className="max-w-2xl space-y-4">
+                <div className="flex items-center gap-2">
+                  <Badge variant="navy">{oneMonthItem.badgeText}</Badge>
+                  <span className="text-xs font-mono text-gray-400">{oneMonthItem.sku}</span>
                 </div>
 
-                <div className="pt-6 border-t border-gray-100 flex items-center justify-between">
-                  <span className="text-[11px] font-mono text-gray-500">
-                    {item.colorName}
+                <h2 className="text-2xl sm:text-3xl font-black text-[#0B2346] tracking-tight">
+                  {oneMonthItem.name}
+                </h2>
+
+                <p className="text-xs sm:text-sm text-gray-600 leading-relaxed">
+                  {oneMonthItem.description}
+                </p>
+
+                {/* PROTOCOL PHASE FORMULATION CLARIFICATION */}
+                <div className="pt-2 space-y-2">
+                  <span className="text-[11px] font-mono uppercase tracking-wider text-gray-500 font-bold block">
+                    {locale === 'ar' ? 'مراحل التركيبة الشهرية لبروتوكول ZIRON:' : locale === 'fr' ? 'Étapes de formulation du protocole ZIRON :' : 'ZIRON Protocol Monthly Formulation Stages:'}
                   </span>
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={() => handleOpenOrder(item)}
-                    className="cursor-pointer"
-                  >
-                    {s.selectPhaseBtn}
-                  </Button>
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                    {stagePhases.map((phase) => (
+                      <div key={phase.id} className="p-3 bg-[#F5F7FA] border border-[#E2E8F0] space-y-1">
+                        <div className="flex items-center justify-between">
+                          <span className="text-[10px] font-mono font-bold" style={{ color: phase.containerColorHex }}>
+                            {phase.badgeText}
+                          </span>
+                          <span className="text-[10px] font-mono text-gray-400">{phase.capsuleCount} cap</span>
+                        </div>
+                        <span className="text-xs font-bold text-[#0B2346] block">{phase.name}</span>
+                        <span className="text-[10px] text-gray-500 block leading-tight">{phase.description}</span>
+                      </div>
+                    ))}
+                  </div>
+                  <p className="text-[11px] text-gray-500 italic">
+                    {locale === 'ar'
+                      ? 'ملاحظة: تتوفر عبوة ZIRON الشهرية لكل مرحلة من مراحل البروتوكول وتتضمن ختم أمان ملون ورمز تحقق أمني مشفر.'
+                      : locale === 'fr'
+                      ? 'Remarque : chaque flacon mensuel ZIRON correspond à une étape du protocole avec scellé sécurisé et code de vérification cryptographique.'
+                      : 'Note: ZIRON 1-Month containers correspond to protocol progression stages, each equipped with tamper-evident seals and serialized security codes.'}
+                  </p>
                 </div>
-              </Card>
-            ))}
+              </div>
+
+              <div className="flex flex-col items-start lg:items-end justify-between gap-4 border-t lg:border-t-0 pt-6 lg:pt-0 border-gray-100 shrink-0">
+                <div className="text-start lg:text-end">
+                  <span className="text-[11px] uppercase tracking-wider text-gray-500 block">
+                    {locale === 'ar' ? 'سعر العبوة الشهرية (30 كبسولة)' : locale === 'fr' ? 'Prix Flacon Mensuel (30 Gélules)' : 'Monthly Container (30 Capsules)'}
+                  </span>
+                  <span className="text-2xl sm:text-3xl font-black font-mono text-[#0B2346]">
+                    {formatDzdPrice(oneMonthItem.priceDzd, locale)}
+                  </span>
+                  <span className="text-[11px] text-amber-700 block font-medium mt-0.5">
+                    {locale === 'ar'
+                      ? 'الشحن: يُتفق عليه مع العميل حسب الولاية (الدفع عند الاستلام)'
+                      : locale === 'fr'
+                      ? 'Livraison : Convenue avec le client selon la wilaya (Paiement à la livraison)'
+                      : 'Shipping: Agreed with customer based on wilaya (Cash on delivery)'}
+                  </span>
+                </div>
+
+                <Button
+                  variant="primary"
+                  size="lg"
+                  onClick={() => handleOpenOrder(oneMonthItem)}
+                  className="w-full sm:w-auto flex items-center justify-center gap-2 cursor-pointer"
+                >
+                  <ShoppingBag className="w-4 h-4" />
+                  <span>
+                    {locale === 'ar' ? 'طلب عبوة شهر واحد (8,000 د.ج)' : locale === 'fr' ? 'Commander 1 Mois (8 000 DZD)' : 'Order 1 Month (8,000 DZD)'}
+                  </span>
+                </Button>
+              </div>
+            </div>
           </div>
         </section>
 

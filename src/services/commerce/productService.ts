@@ -61,7 +61,7 @@ export const CANONICAL_SEED_VARIANTS: ProductVariant[] = ZIRON_CATALOG.map((cat)
   },
   quantity: cat.capsuleCount,
   unit: 'capsules',
-  price: cat.priceDzd || 3500,
+  price: cat.priceDzd || 8000,
   currency: 'DZD',
   status: 'ACTIVE',
   inventoryId: `inv-${cat.sku.toLowerCase()}`,

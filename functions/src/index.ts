@@ -5310,6 +5310,12 @@ export const createCustomerOrder = functions.https.onCall(async (data, context) 
 
   const { items, shippingAddress, idempotencyKey } = data || {};
 
+  if (idempotencyKey !== undefined && idempotencyKey !== null) {
+    if (typeof idempotencyKey !== 'string' || idempotencyKey.trim().length === 0) {
+      throw new functions.https.HttpsError('invalid-argument', 'Idempotency key must be a non-empty string when provided.');
+    }
+  }
+
   // 1. Trim idempotencyKey if provided
   const trimmedIdempotencyKey =
     idempotencyKey && typeof idempotencyKey === 'string' && idempotencyKey.trim().length > 0
@@ -5358,11 +5364,12 @@ export const createCustomerOrder = functions.https.onCall(async (data, context) 
 
   // 4. Run Atomic Transaction for Idempotency, Stock Verification, Pricing, and Creation
   const orderResult = await db.runTransaction(async (transaction) => {
-    // ATOMIC IDEMPOTENCY CHECK (Scoped by callerUid to prevent cross-user key collision)
+    // ATOMIC IDEMPOTENCY CHECK (Strictly scoped by callerUid to prevent cross-user key collision)
     let idempDocRef: admin.firestore.DocumentReference | null = null;
     let scopedIdempId: string | null = null;
     if (trimmedIdempotencyKey) {
-      scopedIdempId = `${callerUid}_${trimmedIdempotencyKey}`;
+      const normalizedKey = trimmedIdempotencyKey.replace(/[\/\s#?]/g, '_').slice(0, 100);
+      scopedIdempId = `${callerUid}_${normalizedKey}`;
       idempDocRef = db.collection('idempotencyRecords').doc(scopedIdempId);
       const idempSnap = await transaction.get(idempDocRef);
       if (idempSnap.exists) {
@@ -5375,23 +5382,6 @@ export const createCustomerOrder = functions.https.onCall(async (data, context) 
               isDuplicate: true,
               order: { id: existingOrderSnap.id, ...existingOrderSnap.data() },
             };
-          }
-        }
-      } else {
-        // Fallback for legacy unscoped records created by this user
-        const legacyDocRef = db.collection('idempotencyRecords').doc(trimmedIdempotencyKey);
-        const legacySnap = await transaction.get(legacyDocRef);
-        if (legacySnap.exists && legacySnap.data()?.userId === callerUid) {
-          const existingOrderId = legacySnap.data()?.orderId;
-          if (existingOrderId) {
-            const existingOrderDocRef = db.collection('orders').doc(existingOrderId);
-            const existingOrderSnap = await transaction.get(existingOrderDocRef);
-            if (existingOrderSnap.exists) {
-              return {
-                isDuplicate: true,
-                order: { id: existingOrderSnap.id, ...existingOrderSnap.data() },
-              };
-            }
           }
         }
       }
@@ -6033,10 +6023,15 @@ export const updateOrderShipping = functions.https.onCall(async (data, context) 
   if (shippingStatus === 'FREE') {
     finalShippingCost = 0;
   } else if (shippingStatus === 'AGREED_WITH_CUSTOMER') {
-    if (typeof shippingCost !== 'number' || isNaN(shippingCost) || shippingCost < 0) {
+    if (
+      typeof shippingCost !== 'number' ||
+      isNaN(shippingCost) ||
+      !Number.isInteger(shippingCost) ||
+      shippingCost <= 0
+    ) {
       throw new functions.https.HttpsError(
         'invalid-argument',
-        'Valid non-negative shippingCost is required when shipping status is AGREED_WITH_CUSTOMER.'
+        'Valid positive integer shippingCost (> 0 DZD) is required when shipping status is AGREED_WITH_CUSTOMER.'
       );
     }
     finalShippingCost = Math.round(shippingCost);
@@ -6063,23 +6058,26 @@ export const updateOrderShipping = functions.https.onCall(async (data, context) 
     }
 
     // SECTION 15: THREE-MONTH BUNDLE PROTECTION (Must always remain FREE shipping / 0 DZD)
-    const isBundleOrder =
+    const hasBundleItem =
       Array.isArray(currentOrder.items) &&
       currentOrder.items.length > 0 &&
-      currentOrder.items.every((it: any) => {
+      currentOrder.items.some((it: any) => {
         const sku = (it.sku || '').toUpperCase();
         const vid = (it.variantId || '').toUpperCase();
+        const pid = (it.productId || '').toUpperCase();
         return (
           sku === 'ZR-BNDL-90C' ||
           sku === 'ZR-3M-90C' ||
           sku.includes('BNDL') ||
           sku.includes('3M') ||
           vid.includes('BUNDLE') ||
-          vid.includes('3M')
+          vid.includes('3M') ||
+          pid.includes('BUNDLE') ||
+          pid.includes('3M')
         );
       });
 
-    if (isBundleOrder && (shippingStatus !== 'FREE' || finalShippingCost > 0)) {
+    if (hasBundleItem && (shippingStatus !== 'FREE' || finalShippingCost > 0)) {
       throw new functions.https.HttpsError(
         'failed-precondition',
         'ZIRON 3-Month Complete Program Bundle is strictly protected with Free Shipping. Cannot assign paid shipping.'
