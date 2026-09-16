@@ -14,38 +14,20 @@ import {
 import { CANONICAL_SEED_VARIANTS } from './productService';
 
 /**
- * Fallback Canonical Inventory
- */
-export const CANONICAL_SEED_INVENTORY: Record<string, InventoryRecord> = {};
-CANONICAL_SEED_VARIANTS.forEach((v) => {
-  CANONICAL_SEED_INVENTORY[v.id] = {
-    id: `inv-${v.sku.toLowerCase()}`,
-    variantId: v.id,
-    productId: v.productId,
-    sku: v.sku,
-    availableQuantity: 100,
-    reservedQuantity: 0,
-    soldQuantity: 0,
-    lowStockThreshold: 10,
-    status: 'IN_STOCK',
-    updatedAt: '2026-01-01T00:00:00.000Z',
-  };
-});
-
-/**
  * Computes status based on quantity and threshold
  */
 export function computeInventoryStatus(
   availableQuantity: number,
   lowStockThreshold: number = 10
 ): InventoryStatus {
-  if (availableQuantity <= 0) return 'OUT_OF_STOCK';
+  if (typeof availableQuantity !== 'number' || isNaN(availableQuantity) || availableQuantity <= 0) return 'OUT_OF_STOCK';
   if (availableQuantity <= lowStockThreshold) return 'LOW_STOCK';
   return 'IN_STOCK';
 }
 
 /**
- * Gets inventory record for a variant
+ * Gets inventory record for a variant.
+ * Strictly fail-closed: returns null if no authoritative inventory record exists in Firestore.
  */
 export async function getInventoryByVariantId(variantId: string): Promise<InventoryRecord | null> {
   try {
@@ -58,11 +40,12 @@ export async function getInventoryByVariantId(variantId: string): Promise<Invent
   } catch (err) {
     console.warn(`Could not fetch inventory for ${variantId}:`, err);
   }
-  return CANONICAL_SEED_INVENTORY[variantId] || null;
+  return null;
 }
 
 /**
- * Admin: Loads all inventory records
+ * Admin: Loads all inventory records.
+ * Strictly returns documents found in Firestore without fallback fake stock.
  */
 export async function getAllInventoryAdmin(): Promise<InventoryRecord[]> {
   try {
@@ -73,7 +56,7 @@ export async function getAllInventoryAdmin(): Promise<InventoryRecord[]> {
   } catch (err) {
     console.warn('Could not read admin inventory:', err);
   }
-  return Object.values(CANONICAL_SEED_INVENTORY);
+  return [];
 }
 
 /**
