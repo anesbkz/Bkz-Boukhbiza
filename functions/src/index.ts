@@ -5170,13 +5170,16 @@ export const updateCommerceVariant = functions.https.onCall(async (data, context
  */
 export const updateCommerceInventory = functions.https.onCall(async (data, context) => {
   const { callerUid, callerEmail, callerRoles } = await assertCanManageCommerce(context);
-  const { variantId, adjustment, reason } = data || {};
+  const { variantId, adjustment, reason, lowStockThreshold } = data || {};
 
   if (!variantId || typeof variantId !== 'string') {
     throw new functions.https.HttpsError('invalid-argument', 'Valid variantId is required.');
   }
   if (typeof adjustment !== 'number') {
     throw new functions.https.HttpsError('invalid-argument', 'Numeric adjustment value is required.');
+  }
+  if (!reason || typeof reason !== 'string' || reason.trim().length === 0) {
+    throw new functions.https.HttpsError('invalid-argument', 'A mandatory reason is required for manual inventory adjustments.');
   }
 
   const invId = `inv-${variantId.replace('var-', '')}`;
@@ -5197,11 +5200,21 @@ export const updateCommerceInventory = functions.https.onCall(async (data, conte
     const available = d.availableQuantity ?? 0;
     const reserved = d.reservedQuantity ?? 0;
     const sold = d.soldQuantity ?? 0;
-    const threshold = d.lowStockThreshold ?? 10;
+    const threshold = typeof lowStockThreshold === 'number' && lowStockThreshold >= 0
+      ? lowStockThreshold
+      : (d.lowStockThreshold ?? 10);
     const productId = d.productId || '';
     const sku = d.sku || '';
 
-    const newAvailable = Math.max(0, available + adjustment);
+    if (available + adjustment < 0) {
+      throw new functions.https.HttpsError(
+        'failed-precondition',
+        `Adjustment of ${adjustment} would result in negative available inventory (current available: ${available}). Negative stock is strictly prohibited.`
+      );
+    }
+
+    const newAvailable = available + adjustment;
+    const totalQuantity = newAvailable + reserved + sold;
     const newStatus =
       newAvailable <= 0
         ? 'OUT_OF_STOCK'
@@ -5214,6 +5227,7 @@ export const updateCommerceInventory = functions.https.onCall(async (data, conte
       variantId,
       productId,
       sku,
+      totalQuantity,
       availableQuantity: newAvailable,
       reservedQuantity: reserved,
       soldQuantity: sold,
@@ -5238,7 +5252,9 @@ export const updateCommerceInventory = functions.https.onCall(async (data, conte
           adjustment,
           previousAvailable: available,
           newAvailable,
-          reason: reason || 'Manual Admin Adjustment',
+          totalQuantity,
+          lowStockThreshold: threshold,
+          reason: reason.trim(),
         },
       },
       transaction
@@ -5531,6 +5547,7 @@ export const createCustomerOrder = functions.https.onCall(async (data, context) 
           variantId: variantData.id,
           productId: variantData.productId,
           sku: variantData.sku,
+          totalQuantity: newAvailable + newReserved + sold,
           availableQuantity: newAvailable,
           reservedQuantity: newReserved,
           soldQuantity: sold,
@@ -5684,7 +5701,26 @@ export const updateOrderStatus = functions.https.onCall(async (data, context) =>
       );
     }
 
-    // If transitioning to CANCELLED, restore inventory
+    // Operational rule: Cannot ship an order with unresolved shipping negotiation
+    if (status === 'SHIPPED' && currentOrder.shippingStatus === 'NEGOTIATION_REQUIRED') {
+      throw new functions.https.HttpsError(
+        'failed-precondition',
+        'Cannot transition order to SHIPPED while shipping fee is pending negotiation. Delivery terms must be agreed with customer first.'
+      );
+    }
+
+    // Operational rule: Mandatory cancellation reason
+    if (status === 'CANCELLED' && (!note || typeof note !== 'string' || note.trim().length === 0)) {
+      throw new functions.https.HttpsError(
+        'invalid-argument',
+        'A mandatory cancellation reason (note) is required when cancelling an order.'
+      );
+    }
+
+    // If transitioning to CANCELLED, restore inventory and handle refund status
+    const isPaid = currentOrder.paymentStatus === 'PAID';
+    const nextPaymentStatus = (status === 'CANCELLED' && isPaid) ? 'REFUNDED' : currentOrder.paymentStatus;
+
     if (status === 'CANCELLED') {
       for (const item of currentOrder.items || []) {
         const invId = `inv-${item.sku.toLowerCase()}`;
@@ -5692,7 +5728,6 @@ export const updateOrderStatus = functions.https.onCall(async (data, context) =>
         const invSnap = await transaction.get(invRef);
         if (invSnap.exists) {
           const invData = invSnap.data()!;
-          const isPaid = currentOrder.paymentStatus === 'PAID';
           let available = invData.availableQuantity ?? 0;
           let reserved = invData.reservedQuantity ?? 0;
           let sold = invData.soldQuantity ?? 0;
@@ -5710,10 +5745,12 @@ export const updateOrderStatus = functions.https.onCall(async (data, context) =>
           }
 
           const threshold = invData.lowStockThreshold ?? 10;
+          const totalQuantity = available + reserved + sold;
           const newStatus =
             available <= 0 ? 'OUT_OF_STOCK' : available <= threshold ? 'LOW_STOCK' : 'IN_STOCK';
 
           transaction.update(invRef, {
+            totalQuantity,
             availableQuantity: available,
             reservedQuantity: reserved,
             soldQuantity: sold,
@@ -5724,9 +5761,40 @@ export const updateOrderStatus = functions.https.onCall(async (data, context) =>
       }
     }
 
+    // Section 8: Restart Fund Entitlement on Delivery (500 DZD per container)
+    let containersDelivered = 0;
+    if (status === 'DELIVERED') {
+      for (const item of currentOrder.items || []) {
+        const sku = (item.sku || '').toUpperCase();
+        if (sku.includes('BNDL') || sku.includes('3M') || sku === 'ZR-BNDL-90C' || sku === 'ZR-3M-90C') {
+          containersDelivered += 3 * (item.quantity || 1);
+        } else {
+          containersDelivered += 1 * (item.quantity || 1);
+        }
+      }
+
+      if (containersDelivered > 0) {
+        const fundRef = db.collection('restartFundContributions').doc(orderId);
+        const fundSnap = await transaction.get(fundRef);
+        if (!fundSnap.exists) {
+          transaction.set(fundRef, {
+            id: orderId,
+            orderId,
+            orderNumber: currentOrder.orderNumber,
+            userId: currentOrder.userId,
+            containersCount: containersDelivered,
+            amountPerContainer: 500,
+            totalContributionDzd: containersDelivered * 500,
+            createdAt: now,
+            status: 'COMMITTED',
+          });
+        }
+      }
+    }
+
     const historyEntry = {
       status,
-      paymentStatus: currentOrder.paymentStatus,
+      paymentStatus: nextPaymentStatus,
       fulfillmentStatus:
         status === 'DELIVERED'
           ? 'DELIVERED'
@@ -5742,6 +5810,7 @@ export const updateOrderStatus = functions.https.onCall(async (data, context) =>
 
     const updates: Record<string, any> = {
       status,
+      paymentStatus: nextPaymentStatus,
       fulfillmentStatus: historyEntry.fulfillmentStatus,
       history: admin.firestore.FieldValue.arrayUnion(historyEntry),
       updatedAt: now,
@@ -5753,6 +5822,7 @@ export const updateOrderStatus = functions.https.onCall(async (data, context) =>
       order: { id: snap.id, ...currentOrder, ...updates },
       unchanged: false,
       previousStatus: currentOrder.status,
+      containersDelivered,
     };
   });
 
@@ -5770,6 +5840,23 @@ export const updateOrderStatus = functions.https.onCall(async (data, context) =>
         note,
       },
     });
+
+    if (status === 'DELIVERED' && result.containersDelivered && result.containersDelivered > 0) {
+      await writeAuthoritativeAuditLog(db, {
+        actorUserId: callerUid,
+        actorEmail: callerEmail,
+        actorRoles: callerRoles,
+        action: 'RESTART_FUND_CONTRIBUTION_RECORDED',
+        resourceType: 'restartFundContributions',
+        resourceId: orderId,
+        metadata: {
+          orderId,
+          containersDelivered: result.containersDelivered,
+          amountPerContainer: 500,
+          totalContributionDzd: result.containersDelivered * 500,
+        },
+      });
+    }
   }
 
   const updatedDoc = await orderRef.get();
@@ -5817,6 +5904,14 @@ export const updatePaymentStatus = functions.https.onCall(async (data, context) 
       );
     }
 
+    // Operational rule: If order is cancelled, payment cannot move to PAID
+    if (currentOrder.status === 'CANCELLED' && paymentStatus === 'PAID') {
+      throw new functions.https.HttpsError(
+        'failed-precondition',
+        'Cannot mark a cancelled order as PAID.'
+      );
+    }
+
     // If moving to PAID: move items from reservedQuantity to soldQuantity
     if (paymentStatus === 'PAID' && currentOrder.paymentStatus !== 'PAID') {
       for (const item of currentOrder.items || []) {
@@ -5825,12 +5920,15 @@ export const updatePaymentStatus = functions.https.onCall(async (data, context) 
         const invSnap = await transaction.get(invRef);
         if (invSnap.exists) {
           const invData = invSnap.data()!;
+          const currentAvailable = invData.availableQuantity ?? 0;
           const currentReserved = invData.reservedQuantity ?? 0;
           const currentSold = invData.soldQuantity ?? 0;
           const moveQty = Math.min(currentReserved, item.quantity);
           const newReserved = Math.max(0, currentReserved - moveQty);
           const newSold = currentSold + moveQty;
+          const totalQuantity = currentAvailable + newReserved + newSold;
           transaction.update(invRef, {
+            totalQuantity,
             reservedQuantity: newReserved,
             soldQuantity: newSold,
             updatedAt: now,
@@ -5941,6 +6039,16 @@ export const cancelCustomerOrder = functions.https.onCall(async (data, context) 
       }
     }
 
+    if (isStaffCaller && (!reason || typeof reason !== 'string' || reason.trim().length === 0)) {
+      throw new functions.https.HttpsError(
+        'invalid-argument',
+        'A mandatory cancellation reason is required when staff cancels an order.'
+      );
+    }
+
+    const isPaid = order.paymentStatus === 'PAID';
+    const nextPaymentStatus = isPaid ? 'REFUNDED' : order.paymentStatus;
+
     // Restore inventory safely
     for (const item of order.items || []) {
       const invId = `inv-${item.sku.toLowerCase()}`;
@@ -5948,7 +6056,6 @@ export const cancelCustomerOrder = functions.https.onCall(async (data, context) 
       const invSnap = await transaction.get(invRef);
       if (invSnap.exists) {
         const invData = invSnap.data()!;
-        const isPaid = order.paymentStatus === 'PAID';
         let available = invData.availableQuantity ?? 0;
         let reserved = invData.reservedQuantity ?? 0;
         let sold = invData.soldQuantity ?? 0;
@@ -5964,10 +6071,12 @@ export const cancelCustomerOrder = functions.https.onCall(async (data, context) 
         }
 
         const threshold = invData.lowStockThreshold ?? 10;
+        const totalQuantity = available + reserved + sold;
         const newStatus =
           available <= 0 ? 'OUT_OF_STOCK' : available <= threshold ? 'LOW_STOCK' : 'IN_STOCK';
 
         transaction.update(invRef, {
+          totalQuantity,
           availableQuantity: available,
           reservedQuantity: reserved,
           soldQuantity: sold,
@@ -5979,7 +6088,7 @@ export const cancelCustomerOrder = functions.https.onCall(async (data, context) 
 
     const historyEntry = {
       status: 'CANCELLED',
-      paymentStatus: order.paymentStatus,
+      paymentStatus: nextPaymentStatus,
       fulfillmentStatus: 'CANCELLED',
       timestamp: now,
       actorUserId: callerUid,
@@ -5988,12 +6097,13 @@ export const cancelCustomerOrder = functions.https.onCall(async (data, context) 
 
     transaction.update(orderRef, {
       status: 'CANCELLED',
+      paymentStatus: nextPaymentStatus,
       fulfillmentStatus: 'CANCELLED',
       history: admin.firestore.FieldValue.arrayUnion(historyEntry),
       updatedAt: now,
     });
 
-    return { order: { id: snap.id, ...order, status: 'CANCELLED' }, alreadyCancelled: false };
+    return { order: { id: snap.id, ...order, status: 'CANCELLED', paymentStatus: nextPaymentStatus }, alreadyCancelled: false };
   });
 
   if (!result.alreadyCancelled) {

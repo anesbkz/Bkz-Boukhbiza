@@ -47,15 +47,26 @@ export const ProductsPage: React.FC = () => {
               </p>
             </div>
 
-            <Button
-              onClick={() => navigate('app/products/activate')}
-              variant="primary"
-              size="md"
-              className="bg-[#0B2346] cursor-pointer inline-flex items-center gap-2 shrink-0 self-start sm:self-auto"
-            >
-              <QrCode className="w-4 h-4" />
-              <span>{t.products.activateNewBtn}</span>
-            </Button>
+            <div className="flex flex-wrap gap-2 shrink-0 self-start sm:self-auto">
+              <Button
+                onClick={() => navigate('app/orders')}
+                variant="outline"
+                size="md"
+                className="border-[#0B2346] text-[#0B2346] cursor-pointer inline-flex items-center gap-2"
+              >
+                <Package className="w-4 h-4" />
+                <span>{locale === 'ar' ? 'طلباتي والشحن' : locale === 'fr' ? 'Mes Commandes' : 'My Orders & Delivery'}</span>
+              </Button>
+              <Button
+                onClick={() => navigate('app/products/activate')}
+                variant="primary"
+                size="md"
+                className="bg-[#0B2346] cursor-pointer inline-flex items-center gap-2"
+              >
+                <QrCode className="w-4 h-4" />
+                <span>{t.products.activateNewBtn}</span>
+              </Button>
+            </div>
           </div>
         </div>
 

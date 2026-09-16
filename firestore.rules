@@ -300,6 +300,18 @@ service cloud.firestore {
     }
 
     // =========================================================================
+    // RESTART FUND CONTRIBUTIONS (Server-Authoritative Per-Container Allocations)
+    // Recorded on order delivery (500 DZD per physical container).
+    // Customer can read their own contribution record; staff can read all.
+    // Direct client writes are strictly forbidden.
+    // =========================================================================
+    match /restartFundContributions/{orderId} {
+      allow get: if isOwner(existing().userId) || isStaff();
+      allow list: if isStaff() || (isSignedIn() && existing().userId == request.auth.uid);
+      allow create, update, delete: if false;
+    }
+
+    // =========================================================================
     // PRODUCT CODES COLLECTION (Cryptographic Container Serials)
     // Activation is strictly server-authoritative (activateContainerCode Cloud Function).
     // Client creation enforces unactivated initial state.

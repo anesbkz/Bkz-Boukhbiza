@@ -32,6 +32,7 @@ import {
   User,
   AlertCircle,
   X,
+  Calendar,
 } from 'lucide-react';
 
 export const AdminOrdersPage: React.FC = () => {
@@ -40,6 +41,8 @@ export const AdminOrdersPage: React.FC = () => {
   const [loading, setLoading] = useState(true);
   const [statusFilter, setStatusFilter] = useState<string>('ALL');
   const [paymentFilter, setPaymentFilter] = useState<string>('ALL');
+  const [shippingFilter, setShippingFilter] = useState<string>('ALL');
+  const [dateFilter, setDateFilter] = useState<string>('ALL');
   const [searchTerm, setSearchTerm] = useState<string>('');
   const [selectedOrder, setSelectedOrder] = useState<Order | null>(null);
 
@@ -53,9 +56,10 @@ export const AdminOrdersPage: React.FC = () => {
     setLoading(true);
     setActionError(null);
     try {
-      const filters: { status?: OrderStatus; paymentStatus?: PaymentStatus } = {};
+      const filters: { status?: OrderStatus; paymentStatus?: PaymentStatus; shippingStatus?: ShippingStatus } = {};
       if (statusFilter !== 'ALL') filters.status = statusFilter as OrderStatus;
       if (paymentFilter !== 'ALL') filters.paymentStatus = paymentFilter as PaymentStatus;
+      if (shippingFilter !== 'ALL') filters.shippingStatus = shippingFilter as ShippingStatus;
       const data = await getAllOrdersAdmin(filters);
       setOrders(data);
     } catch (err) {
@@ -67,9 +71,30 @@ export const AdminOrdersPage: React.FC = () => {
 
   useEffect(() => {
     loadOrders();
-  }, [statusFilter, paymentFilter]);
+  }, [statusFilter, paymentFilter, shippingFilter]);
 
   const filteredOrders = orders.filter((ord) => {
+    // Date filter
+    if (dateFilter !== 'ALL') {
+      const orderDate = new Date(ord.createdAt);
+      const now = new Date();
+      if (dateFilter === 'TODAY') {
+        const isSameDay =
+          orderDate.getDate() === now.getDate() &&
+          orderDate.getMonth() === now.getMonth() &&
+          orderDate.getFullYear() === now.getFullYear();
+        if (!isSameDay) return false;
+      } else if (dateFilter === 'THIS_WEEK') {
+        const weekAgo = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
+        if (orderDate < weekAgo) return false;
+      } else if (dateFilter === 'THIS_MONTH') {
+        const isSameMonth =
+          orderDate.getMonth() === now.getMonth() &&
+          orderDate.getFullYear() === now.getFullYear();
+        if (!isSameMonth) return false;
+      }
+    }
+
     if (!searchTerm.trim()) return true;
     const term = searchTerm.toLowerCase();
     return (
@@ -77,12 +102,26 @@ export const AdminOrdersPage: React.FC = () => {
       ord.customerSnapshot.email.toLowerCase().includes(term) ||
       (ord.customerSnapshot.displayName || '').toLowerCase().includes(term) ||
       ord.shippingAddress.recipientName.toLowerCase().includes(term) ||
-      ord.shippingAddress.wilaya.toLowerCase().includes(term)
+      (ord.shippingAddress.phone || '').toLowerCase().includes(term) ||
+      (ord.customerSnapshot.phone || '').toLowerCase().includes(term) ||
+      ord.shippingAddress.wilaya.toLowerCase().includes(term) ||
+      (ord.shippingAddress.city || '').toLowerCase().includes(term)
     );
   });
 
   const handleUpdateStatus = async (newStatus: OrderStatus) => {
     if (!selectedOrder) return;
+
+    if (newStatus === 'CANCELLED' && !statusNote.trim()) {
+      setActionError('A mandatory cancellation reason (note) is required when cancelling an order.');
+      return;
+    }
+
+    if (newStatus === 'SHIPPED' && selectedOrder.shippingStatus === 'NEGOTIATION_REQUIRED') {
+      setActionError('Cannot transition order to SHIPPED while shipping fee is pending negotiation. Agree on shipping terms with the customer first.');
+      return;
+    }
+
     setUpdating(true);
     setActionError(null);
     try {
@@ -256,25 +295,25 @@ export const AdminOrdersPage: React.FC = () => {
       </div>
 
       {/* Filters & Search */}
-      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-        <div className="relative">
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3">
+        <div className="relative lg:col-span-1">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-zinc-400" />
           <input
             type="text"
-            placeholder="Search by order #, email, customer, or wilaya..."
+            placeholder="Search order #, customer, phone, wilaya..."
             value={searchTerm}
             onChange={(e) => setSearchTerm(e.target.value)}
-            className="w-full pl-9 pr-4 py-2 bg-zinc-900/50 border border-zinc-800 rounded-lg text-sm text-white placeholder-zinc-500 focus:outline-none focus:border-zinc-700"
+            className="w-full pl-9 pr-3 py-2 bg-zinc-900/50 border border-zinc-800 rounded-lg text-xs text-white placeholder-zinc-500 focus:outline-none focus:border-zinc-700"
           />
         </div>
 
         <div className="flex items-center gap-2">
-          <Filter className="w-4 h-4 text-zinc-400" />
+          <Filter className="w-3.5 h-3.5 text-zinc-400 shrink-0" />
           <select
             value={statusFilter}
             onChange={(e) => setStatusFilter(e.target.value)}
             aria-label="Filter by order status"
-            className="w-full py-2 px-3 bg-zinc-900/50 border border-zinc-800 rounded-lg text-sm text-zinc-300 focus:outline-none focus:border-zinc-700"
+            className="w-full py-2 px-2.5 bg-zinc-900/50 border border-zinc-800 rounded-lg text-xs text-zinc-300 focus:outline-none focus:border-zinc-700"
           >
             <option value="ALL">All Order Statuses</option>
             <option value="PENDING">PENDING</option>
@@ -287,12 +326,12 @@ export const AdminOrdersPage: React.FC = () => {
         </div>
 
         <div className="flex items-center gap-2">
-          <CreditCard className="w-4 h-4 text-zinc-400" />
+          <CreditCard className="w-3.5 h-3.5 text-zinc-400 shrink-0" />
           <select
             value={paymentFilter}
             onChange={(e) => setPaymentFilter(e.target.value)}
             aria-label="Filter by payment status"
-            className="w-full py-2 px-3 bg-zinc-900/50 border border-zinc-800 rounded-lg text-sm text-zinc-300 focus:outline-none focus:border-zinc-700"
+            className="w-full py-2 px-2.5 bg-zinc-900/50 border border-zinc-800 rounded-lg text-xs text-zinc-300 focus:outline-none focus:border-zinc-700"
           >
             <option value="ALL">All Payment Statuses</option>
             <option value="UNPAID">UNPAID</option>
@@ -300,6 +339,36 @@ export const AdminOrdersPage: React.FC = () => {
             <option value="PAID">PAID</option>
             <option value="REFUNDED">REFUNDED</option>
             <option value="FAILED">FAILED</option>
+          </select>
+        </div>
+
+        <div className="flex items-center gap-2">
+          <Truck className="w-3.5 h-3.5 text-zinc-400 shrink-0" />
+          <select
+            value={shippingFilter}
+            onChange={(e) => setShippingFilter(e.target.value)}
+            aria-label="Filter by shipping status"
+            className="w-full py-2 px-2.5 bg-zinc-900/50 border border-zinc-800 rounded-lg text-xs text-zinc-300 focus:outline-none focus:border-zinc-700"
+          >
+            <option value="ALL">All Shipping Statuses</option>
+            <option value="NEGOTIATION_REQUIRED">NEGOTIATION REQUIRED</option>
+            <option value="AGREED_WITH_CUSTOMER">AGREED WITH CUSTOMER</option>
+            <option value="FREE">FREE SHIPPING</option>
+          </select>
+        </div>
+
+        <div className="flex items-center gap-2">
+          <Calendar className="w-3.5 h-3.5 text-zinc-400 shrink-0" />
+          <select
+            value={dateFilter}
+            onChange={(e) => setDateFilter(e.target.value)}
+            aria-label="Filter by date range"
+            className="w-full py-2 px-2.5 bg-zinc-900/50 border border-zinc-800 rounded-lg text-xs text-zinc-300 focus:outline-none focus:border-zinc-700"
+          >
+            <option value="ALL">All Time</option>
+            <option value="TODAY">Today</option>
+            <option value="THIS_WEEK">Past 7 Days</option>
+            <option value="THIS_MONTH">This Month</option>
           </select>
         </div>
       </div>

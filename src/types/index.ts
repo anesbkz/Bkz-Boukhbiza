@@ -21,6 +21,7 @@ export type PublicRoute =
   | 'app/journey'
   | 'app/products'
   | 'app/products/activate'
+  | 'app/orders'
   | 'app/community'
   | 'app/school'
   | 'app/school/courses'

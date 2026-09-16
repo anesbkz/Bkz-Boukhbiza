@@ -92,6 +92,7 @@ export async function cancelOrder(orderId: string, reason?: string): Promise<{ s
 export async function getAllOrdersAdmin(filters?: {
   status?: OrderStatus;
   paymentStatus?: PaymentStatus;
+  shippingStatus?: import('@/types/commerce').ShippingStatus;
   limitCount?: number;
 }): Promise<Order[]> {
   try {
@@ -112,6 +113,13 @@ export async function getAllOrdersAdmin(filters?: {
       q = query(
         collection(db, 'orders'),
         where('paymentStatus', '==', filters.paymentStatus),
+        orderBy('createdAt', 'desc'),
+        limit(filters?.limitCount || 50)
+      );
+    } else if (filters?.shippingStatus) {
+      q = query(
+        collection(db, 'orders'),
+        where('shippingStatus', '==', filters.shippingStatus),
         orderBy('createdAt', 'desc'),
         limit(filters?.limitCount || 50)
       );

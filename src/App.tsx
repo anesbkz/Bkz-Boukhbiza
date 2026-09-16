@@ -27,6 +27,7 @@ import { CertificateVerificationPage } from '@/pages/public/CertificateVerificat
 import { DashboardPage } from '@/pages/app/DashboardPage';
 import { JourneyPage } from '@/pages/app/JourneyPage';
 import { ProductsPage } from '@/pages/app/ProductsPage';
+import { CustomerOrdersPage } from '@/pages/app/CustomerOrdersPage';
 import { ActivateProductPage } from '@/pages/app/ActivateProductPage';
 import { ProfilePage } from '@/pages/app/ProfilePage';
 import { AppCommunityPage } from '@/pages/app/AppCommunityPage';
@@ -245,6 +246,13 @@ function RouterOutlet() {
         appContent = (
           <CustomerRouteGuard>
             <ActivateProductPage />
+          </CustomerRouteGuard>
+        );
+        break;
+      case 'app/orders':
+        appContent = (
+          <CustomerRouteGuard>
+            <CustomerOrdersPage />
           </CustomerRouteGuard>
         );
         break;

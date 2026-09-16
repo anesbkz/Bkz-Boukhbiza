@@ -102,6 +102,7 @@ export interface InventoryRecord {
   variantId: string;
   productId: string;
   sku: string;
+  totalQuantity?: number;
   availableQuantity: number;
   reservedQuantity: number;
   soldQuantity: number;
@@ -232,6 +233,7 @@ export interface AdjustInventoryRequest {
   variantId: string;
   adjustment: number; // Positive to add stock, negative to subtract
   reason: string;
+  lowStockThreshold?: number;
 }
 
 export interface CreateProductPayload {

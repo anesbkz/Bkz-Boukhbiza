@@ -25,6 +25,7 @@ import {
   Globe,
   Sparkles,
   Coins,
+  ShoppingBag,
 } from 'lucide-react';
 
 interface NavItem {

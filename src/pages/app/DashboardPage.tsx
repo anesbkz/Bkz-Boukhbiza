@@ -128,7 +128,16 @@ export const DashboardPage: React.FC = () => {
                 </div>
               </div>
 
-              <div className="flex items-center gap-2">
+              <div className="flex flex-wrap items-center gap-2">
+                <Button
+                  onClick={() => navigate('app/orders')}
+                  variant="outline"
+                  size="sm"
+                  className="cursor-pointer inline-flex items-center gap-1.5"
+                >
+                  <Package className="w-3.5 h-3.5" />
+                  <span>{locale === 'ar' ? 'طلباتي' : locale === 'fr' ? 'Mes Commandes' : 'My Orders'}</span>
+                </Button>
                 <Button
                   onClick={() => navigate('app/profile')}
                   variant="outline"
