@@ -5385,6 +5385,10 @@ export const createCustomerOrder = functions.https.onCall(async (data, context) 
             };
           }
         }
+        throw new functions.https.HttpsError(
+          'already-exists',
+          'A transaction with this idempotency key was previously processed but the referenced order record could not be loaded.'
+        );
       }
     }
 
@@ -5434,6 +5438,18 @@ export const createCustomerOrder = functions.https.onCall(async (data, context) 
         );
       }
 
+      // Phase formulations are internal stages and not purchasable as independent products on the public storefront
+      const RESTRICTED_PHASE_SKUS = ['ZR-PH01-30C', 'ZR-PH02-30C', 'ZR-PH03-30C'];
+      const isStaffCaller = callerRoles.some((r) =>
+        ['SUPER_ADMIN', 'ADMIN', 'PRODUCT_MANAGER'].includes(r)
+      );
+      if (RESTRICTED_PHASE_SKUS.includes(variantData.sku.toUpperCase()) && !isStaffCaller) {
+        throw new functions.https.HttpsError(
+          'failed-precondition',
+          `Phase formulation references (${variantData.sku}) are internal stages and not purchasable as independent products. Please order ZIRON 1 Month (ZR-1M-30C) or the Complete Program Bundle (ZR-BNDL-90C).`
+        );
+      }
+
       // Check product status if product document exists
       const productDocRef = db.collection('products').doc(variantData.productId);
       const productSnap = await transaction.get(productDocRef);
@@ -5461,7 +5477,7 @@ export const createCustomerOrder = functions.https.onCall(async (data, context) 
 
       const invData = invSnap.data()!;
       const available = invData.availableQuantity;
-      if (typeof available !== 'number') {
+      if (typeof available !== 'number' || isNaN(available) || available < 0) {
         throw new functions.https.HttpsError(
           'failed-precondition',
           `Inventory availableQuantity is invalid for "${variantData.sku}". Order rejected.`

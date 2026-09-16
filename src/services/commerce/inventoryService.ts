@@ -11,7 +11,6 @@ import {
   InventoryStatus,
   AdjustInventoryRequest,
 } from '@/types/commerce';
-import { CANONICAL_SEED_VARIANTS } from './productService';
 
 /**
  * Computes status based on quantity and threshold
