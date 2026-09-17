@@ -5339,6 +5339,20 @@ export const createCustomerOrder = functions.https.onCall(async (data, context) 
       ? idempotencyKey.trim()
       : null;
 
+  // 1.5. Reject Client Price / Subtotal / Total / Shipping Tampering
+  if (
+    data.subtotal !== undefined ||
+    data.total !== undefined ||
+    data.price !== undefined ||
+    data.shippingCost !== undefined ||
+    data.unitPrice !== undefined
+  ) {
+    throw new functions.https.HttpsError(
+      'invalid-argument',
+      'Client price/subtotal/total tampering detected. Pricing and totals are strictly server-authoritative and must not be supplied by the client.'
+    );
+  }
+
   // 2. Validate Order Items
   if (!Array.isArray(items) || items.length === 0) {
     throw new functions.https.HttpsError('invalid-argument', 'Order must contain at least one item.');
@@ -5348,6 +5362,17 @@ export const createCustomerOrder = functions.https.onCall(async (data, context) 
   }
 
   for (const it of items) {
+    if (
+      it.price !== undefined ||
+      it.unitPrice !== undefined ||
+      it.subtotal !== undefined ||
+      it.total !== undefined
+    ) {
+      throw new functions.https.HttpsError(
+        'invalid-argument',
+        `Client price tampering detected on item ${it.variantId || 'unknown'}. Pricing is strictly server-authoritative.`
+      );
+    }
     if (!it.variantId || typeof it.variantId !== 'string') {
       throw new functions.https.HttpsError('invalid-argument', 'Each item must specify a valid variantId string.');
     }
