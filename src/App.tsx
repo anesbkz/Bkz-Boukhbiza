@@ -75,7 +75,15 @@ function RouterOutlet() {
   // Admin routes routed through AdminShell
   if (route.startsWith('admin')) {
     let adminContent: React.ReactNode;
-    switch (route) {
+    if (route.startsWith('admin/orders/')) {
+      const orderId = route.substring('admin/orders/'.length);
+      adminContent = (
+        <AdminRouteGuard requiredPermission="MANAGE_ORDERS">
+          <AdminOrdersPage orderId={orderId} />
+        </AdminRouteGuard>
+      );
+    } else {
+      switch (route) {
       case 'admin/school':
         adminContent = (
           <AdminRouteGuard requiredPermission="MANAGE_SCHOOL">
@@ -219,6 +227,7 @@ function RouterOutlet() {
           </AdminRouteGuard>
         );
         break;
+      }
     }
 
     return <AdminShell>{adminContent}</AdminShell>;

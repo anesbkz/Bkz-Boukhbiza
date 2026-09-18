@@ -40,6 +40,7 @@ export type PublicRoute =
   | 'admin/products'
   | 'admin/codes'
   | 'admin/orders'
+  | `admin/orders/${string}`
   | 'admin/community'
   | 'admin/school'
   | 'admin/courses'

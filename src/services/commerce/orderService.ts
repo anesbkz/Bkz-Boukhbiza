@@ -54,6 +54,13 @@ export async function getOrderById(orderId: string): Promise<Order | null> {
     if (snap.exists()) {
       return { id: snap.id, ...(snap.data() as Omit<Order, 'id'>) };
     }
+    // Fallback: lookup by orderNumber (e.g. ZR-2026-XXXX)
+    const q = query(collection(db, 'orders'), where('orderNumber', '==', orderId), limit(1));
+    const querySnap = await getDocs(q);
+    if (!querySnap.empty) {
+      const docSnap = querySnap.docs[0];
+      return { id: docSnap.id, ...(docSnap.data() as Omit<Order, 'id'>) };
+    }
   } catch (err) {
     console.warn(`Error fetching order ${orderId}:`, err);
   }
@@ -138,8 +145,8 @@ export async function getAllOrdersAdmin(filters?: {
  */
 export async function updateOrderStatusAdmin(
   payload: UpdateOrderStatusRequest
-): Promise<{ success: boolean; order: Order }> {
-  const callFn = httpsCallable<UpdateOrderStatusRequest, { success: boolean; order: Order }>(
+): Promise<{ success: boolean; order: Order; message?: string }> {
+  const callFn = httpsCallable<UpdateOrderStatusRequest, { success: boolean; order: Order; message?: string }>(
     functions,
     'updateOrderStatus'
   );
@@ -152,8 +159,8 @@ export async function updateOrderStatusAdmin(
  */
 export async function updatePaymentStatusAdmin(
   payload: UpdatePaymentStatusRequest
-): Promise<{ success: boolean; order: Order }> {
-  const callFn = httpsCallable<UpdatePaymentStatusRequest, { success: boolean; order: Order }>(
+): Promise<{ success: boolean; order: Order; message?: string }> {
+  const callFn = httpsCallable<UpdatePaymentStatusRequest, { success: boolean; order: Order; message?: string }>(
     functions,
     'updatePaymentStatus'
   );
@@ -166,8 +173,8 @@ export async function updatePaymentStatusAdmin(
  */
 export async function updateOrderShippingAdmin(
   payload: UpdateOrderShippingRequest
-): Promise<{ success: boolean; order: Order }> {
-  const callFn = httpsCallable<UpdateOrderShippingRequest, { success: boolean; order: Order }>(
+): Promise<{ success: boolean; order: Order; message?: string }> {
+  const callFn = httpsCallable<UpdateOrderShippingRequest, { success: boolean; order: Order; message?: string }>(
     functions,
     'updateOrderShipping'
   );

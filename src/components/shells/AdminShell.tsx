@@ -167,7 +167,9 @@ export const AdminShell: React.FC<{ children: React.ReactNode }> = ({ children }
             <nav className="space-y-0.5">
               {visibleNav.map((item) => {
                 const Icon = item.icon;
-                const isActive = route === item.id;
+                const isActive =
+                  route === item.id ||
+                  (item.id === 'admin/orders' && route.startsWith('admin/orders'));
                 return (
                   <button
                     key={item.id}
