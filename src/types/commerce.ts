@@ -119,6 +119,7 @@ export interface OrderItem {
   productId: string;
   variantId: string;
   sku: string;
+  inventoryId?: string;
   productNameSnapshot: string;
   variantNameSnapshot: string;
   quantity: number;
@@ -234,6 +235,7 @@ export interface AdjustInventoryRequest {
   adjustment: number; // Positive to add stock, negative to subtract
   reason: string;
   lowStockThreshold?: number;
+  inventoryId?: string;
 }
 
 export interface CreateProductPayload {
@@ -262,4 +264,5 @@ export interface CreateVariantPayload {
   status?: VariantStatus;
   initialStock?: number;
   lowStockThreshold?: number;
+  inventoryId?: string;
 }

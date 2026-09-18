@@ -5023,6 +5023,33 @@ export const updateCommerceProduct = functions.https.onCall(async (data, context
 });
 
 /**
+ * Helper to authoritatively resolve an inventory document reference.
+ * Strictly avoids reconstructing IDs from SKU when an authoritative inventoryId is available.
+ */
+async function resolveAuthoritativeInventoryRef(
+  transaction: FirebaseFirestore.Transaction,
+  item: { inventoryId?: string; variantId?: string; sku?: string }
+): Promise<{ ref: FirebaseFirestore.DocumentReference; id: string }> {
+  if (item.inventoryId && typeof item.inventoryId === 'string' && item.inventoryId.trim().length > 0) {
+    const id = item.inventoryId.trim();
+    return { ref: db.collection('inventory').doc(id), id };
+  }
+  if (item.variantId && typeof item.variantId === 'string') {
+    const vSnap = await transaction.get(db.collection('productVariants').doc(item.variantId));
+    if (vSnap.exists) {
+      const vData = vSnap.data();
+      if (vData?.inventoryId && typeof vData.inventoryId === 'string' && vData.inventoryId.trim().length > 0) {
+        const id = vData.inventoryId.trim();
+        return { ref: db.collection('inventory').doc(id), id };
+      }
+    }
+  }
+  // Backward compatibility fallback for legacy records missing authoritative inventoryId
+  const fallbackId = `inv-${(item.sku || '').toLowerCase().replace(/[^a-z0-9]/g, '-')}`;
+  return { ref: db.collection('inventory').doc(fallbackId), id: fallbackId };
+}
+
+/**
  * Callable Function: Create Product Variant (Admin / Staff)
  */
 export const createCommerceVariant = functions.https.onCall(async (data, context) => {
@@ -5039,6 +5066,7 @@ export const createCommerceVariant = functions.https.onCall(async (data, context
     status = 'ACTIVE',
     initialStock = 100,
     lowStockThreshold = 10,
+    inventoryId,
   } = data || {};
 
   if (!productId || typeof productId !== 'string') {
@@ -5053,7 +5081,9 @@ export const createCommerceVariant = functions.https.onCall(async (data, context
 
   const now = new Date().toISOString();
   const variantId = `var-${sku.toLowerCase().replace(/[^a-z0-9]/g, '-')}`;
-  const invId = `inv-${sku.toLowerCase().replace(/[^a-z0-9]/g, '-')}`;
+  const invId = inventoryId && typeof inventoryId === 'string' && inventoryId.trim().length > 0
+    ? inventoryId.trim()
+    : `inv-${sku.toLowerCase().replace(/[^a-z0-9]/g, '-')}`;
 
   const variantRef = db.collection('productVariants').doc(variantId);
   const invRef = db.collection('inventory').doc(invId);
@@ -5170,10 +5200,10 @@ export const updateCommerceVariant = functions.https.onCall(async (data, context
  */
 export const updateCommerceInventory = functions.https.onCall(async (data, context) => {
   const { callerUid, callerEmail, callerRoles } = await assertCanManageCommerce(context);
-  const { variantId, adjustment, reason, lowStockThreshold } = data || {};
+  const { variantId, adjustment, reason, lowStockThreshold, inventoryId } = data || {};
 
-  if (!variantId || typeof variantId !== 'string') {
-    throw new functions.https.HttpsError('invalid-argument', 'Valid variantId is required.');
+  if (!variantId && !inventoryId) {
+    throw new functions.https.HttpsError('invalid-argument', 'Valid variantId or inventoryId is required.');
   }
   if (typeof adjustment !== 'number') {
     throw new functions.https.HttpsError('invalid-argument', 'Numeric adjustment value is required.');
@@ -5182,10 +5212,22 @@ export const updateCommerceInventory = functions.https.onCall(async (data, conte
     throw new functions.https.HttpsError('invalid-argument', 'A mandatory reason is required for manual inventory adjustments.');
   }
 
-  const invId = `inv-${variantId.replace('var-', '')}`;
-  const invRef = db.collection('inventory').doc(invId);
-
   const result = await db.runTransaction(async (transaction) => {
+    let invId = inventoryId && typeof inventoryId === 'string' ? inventoryId.trim() : '';
+    if (!invId && variantId) {
+      const vSnap = await transaction.get(db.collection('productVariants').doc(variantId));
+      if (vSnap.exists) {
+        const vData = vSnap.data();
+        if (vData?.inventoryId && typeof vData.inventoryId === 'string') {
+          invId = vData.inventoryId.trim();
+        }
+      }
+      if (!invId) {
+        invId = `inv-${variantId.replace('var-', '')}`;
+      }
+    }
+
+    const invRef = db.collection('inventory').doc(invId);
     const snap = await transaction.get(invRef);
     const now = new Date().toISOString();
 
@@ -5549,6 +5591,7 @@ export const createCustomerOrder = functions.https.onCall(async (data, context) 
         productId: variantData.productId,
         variantId: variantData.id,
         sku: variantData.sku,
+        inventoryId: invId,
         productNameSnapshot: variantName,
         variantNameSnapshot: variantName,
         quantity: it.quantity,
@@ -5748,8 +5791,7 @@ export const updateOrderStatus = functions.https.onCall(async (data, context) =>
 
     if (status === 'CANCELLED') {
       for (const item of currentOrder.items || []) {
-        const invId = `inv-${item.sku.toLowerCase()}`;
-        const invRef = db.collection('inventory').doc(invId);
+        const { ref: invRef } = await resolveAuthoritativeInventoryRef(transaction, item);
         const invSnap = await transaction.get(invRef);
         if (invSnap.exists) {
           const invData = invSnap.data()!;
@@ -5862,7 +5904,7 @@ export const updateOrderStatus = functions.https.onCall(async (data, context) =>
       metadata: {
         previousStatus: result.previousStatus,
         newStatus: status,
-        note,
+        note: note || null,
       },
     });
 
@@ -5940,8 +5982,7 @@ export const updatePaymentStatus = functions.https.onCall(async (data, context) 
     // If moving to PAID: move items from reservedQuantity to soldQuantity
     if (paymentStatus === 'PAID' && currentOrder.paymentStatus !== 'PAID') {
       for (const item of currentOrder.items || []) {
-        const invId = `inv-${item.sku.toLowerCase()}`;
-        const invRef = db.collection('inventory').doc(invId);
+        const { ref: invRef } = await resolveAuthoritativeInventoryRef(transaction, item);
         const invSnap = await transaction.get(invRef);
         if (invSnap.exists) {
           const invData = invSnap.data()!;
@@ -5995,7 +6036,7 @@ export const updatePaymentStatus = functions.https.onCall(async (data, context) 
       metadata: {
         previousPaymentStatus: result.previousPaymentStatus,
         newPaymentStatus: paymentStatus,
-        note,
+        note: note || null,
       },
     });
   }
@@ -6076,8 +6117,7 @@ export const cancelCustomerOrder = functions.https.onCall(async (data, context) 
 
     // Restore inventory safely
     for (const item of order.items || []) {
-      const invId = `inv-${item.sku.toLowerCase()}`;
-      const invRef = db.collection('inventory').doc(invId);
+      const { ref: invRef } = await resolveAuthoritativeInventoryRef(transaction, item);
       const invSnap = await transaction.get(invRef);
       if (invSnap.exists) {
         const invData = invSnap.data()!;

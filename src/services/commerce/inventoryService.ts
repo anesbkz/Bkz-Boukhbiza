@@ -25,17 +25,42 @@ export function computeInventoryStatus(
 }
 
 /**
- * Gets inventory record for a variant.
- * Strictly fail-closed: returns null if no authoritative inventory record exists in Firestore.
+ * Gets an inventory record directly by its authoritative inventory ID.
  */
-export async function getInventoryByVariantId(variantId: string): Promise<InventoryRecord | null> {
+export async function getInventoryById(inventoryId: string): Promise<InventoryRecord | null> {
+  if (!inventoryId) return null;
   try {
-    const invId = `inv-${variantId.replace('var-', '')}`;
-    const ref = doc(db, 'inventory', invId);
+    const ref = doc(db, 'inventory', inventoryId);
     const snap = await getDoc(ref);
     if (snap.exists()) {
       return { id: snap.id, ...(snap.data() as Omit<InventoryRecord, 'id'>) };
     }
+  } catch (err) {
+    console.warn(`Could not fetch inventory by ID ${inventoryId}:`, err);
+  }
+  return null;
+}
+
+/**
+ * Gets inventory record for a variant.
+ * Strictly fail-closed: checks authoritative ProductVariant for inventoryId first.
+ * Returns null if no authoritative inventory record exists in Firestore.
+ */
+export async function getInventoryByVariantId(variantId: string): Promise<InventoryRecord | null> {
+  try {
+    let invId = '';
+    const variantRef = doc(db, 'productVariants', variantId);
+    const variantSnap = await getDoc(variantRef);
+    if (variantSnap.exists()) {
+      const vData = variantSnap.data() as { inventoryId?: string };
+      if (vData.inventoryId) {
+        invId = vData.inventoryId;
+      }
+    }
+    if (!invId) {
+      invId = `inv-${variantId.replace('var-', '')}`;
+    }
+    return await getInventoryById(invId);
   } catch (err) {
     console.warn(`Could not fetch inventory for ${variantId}:`, err);
   }
