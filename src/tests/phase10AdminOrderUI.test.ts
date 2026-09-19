@@ -33,10 +33,11 @@ describe('Phase 10.5 — Admin Order Operations UI Contracts', () => {
     userId: 'cust-usr-42',
     status: 'PENDING',
     paymentStatus: 'UNPAID',
-    paymentMethod: 'CASH_ON_DELIVERY',
+    fulfillmentStatus: 'UNFULFILLED',
     items: [
       {
         productId: 'ziron-core',
+        variantId: 'var-bundle-3m',
         sku: 'ZR-3M-BUNDLE',
         productNameSnapshot: 'ZIRON 3-Month Complete Program',
         variantNameSnapshot: '3 x 60 Capsules (180 Total)',
@@ -62,6 +63,7 @@ describe('Phase 10.5 — Admin Order Operations UI Contracts', () => {
       notes: 'Ring bell 2B upon arrival',
     },
     customerSnapshot: {
+      uid: 'cust-usr-42',
       displayName: 'Sofiane Benali',
       email: 'sofiane.benali@example.dz',
       phone: '0550123456',
@@ -86,10 +88,11 @@ describe('Phase 10.5 — Admin Order Operations UI Contracts', () => {
     userId: 'cust-usr-99',
     status: 'PENDING',
     paymentStatus: 'UNPAID',
-    paymentMethod: 'CASH_ON_DELIVERY',
+    fulfillmentStatus: 'UNFULFILLED',
     items: [
       {
         productId: 'ziron-phase1',
+        variantId: 'var-phase1-single',
         sku: 'ZR-P1-START',
         productNameSnapshot: 'ZIRON Phase 1 - Metabolic Activation',
         variantNameSnapshot: '60 Capsules',
@@ -112,6 +115,7 @@ describe('Phase 10.5 — Admin Order Operations UI Contracts', () => {
       address: 'Quartier Tahaggart',
     },
     customerSnapshot: {
+      uid: 'cust-usr-99',
       displayName: 'Amine Khelil',
       email: 'amine.khelil@example.dz',
     },
@@ -137,6 +141,7 @@ describe('Phase 10.5 — Admin Order Operations UI Contracts', () => {
       const superAdmin: UserProfile = {
         uid: 'sa-1',
         email: 'superadmin@virexon.dz',
+        displayName: 'Super Admin',
         roles: ['SUPER_ADMIN'],
         status: 'active',
         createdAt: '2026-01-01',
@@ -168,6 +173,7 @@ describe('Phase 10.5 — Admin Order Operations UI Contracts', () => {
       const customer: UserProfile = {
         uid: 'cust-1',
         email: 'customer@test.dz',
+        displayName: 'Customer User',
         roles: ['CUSTOMER'],
         status: 'active',
         createdAt: '2026-01-01',

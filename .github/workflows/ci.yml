@@ -46,5 +46,8 @@ jobs:
       - name: Run Firestore Rules Emulator Tests
         run: npm run test:rules
 
+      - name: Run Firebase Emulator Integration Tests
+        run: npm run test:emulator
+
       - name: Run Production Build
         run: npm run build
