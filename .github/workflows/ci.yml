@@ -46,6 +46,12 @@ jobs:
       - name: Run Firestore Rules Emulator Tests
         run: npm run test:rules
 
+      - name: Install Functions dependencies
+        run: npm --prefix functions ci
+
+      - name: Run Functions Typecheck and Build
+        run: npm --prefix functions run build
+
       - name: Run Firebase Emulator Integration Tests
         run: npm run test:emulator
 
