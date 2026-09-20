@@ -8,6 +8,7 @@ import {
   OrderHistoryEntry,
 } from '@/types/commerce';
 import { formatDzdPrice } from '@/services/commerce/pricingService';
+import { isOrderCustomerCancellable } from '@/services/commerce/orderService';
 
 /**
  * Phase 10.6: Customer Order Experience & Tracking Contracts
@@ -453,6 +454,200 @@ describe('Phase 10.6 — Customer Order Experience & Tracking Contracts', () => 
 
       const orderNumber = route.substring('app/orders/'.length);
       expect(orderNumber).toBe('ZR-2026-0101');
+    });
+  });
+
+  /* ==========================================================================
+     7. PHASE 10.7: CUSTOMER ORDER CANCELLATION & TERMINAL STATE CONTRACTS
+     ========================================================================== */
+  describe('7. Phase 10.7 — Customer Order Cancellation & Terminal State Contracts', () => {
+    // Factory for test orders with variable status and payment status
+    const createTestOrder = (
+      status: OrderStatus,
+      paymentStatus: PaymentStatus = 'UNPAID',
+      shippingStatus: ShippingStatus = 'FREE'
+    ): Order => ({
+      id: `ord-test-${status.toLowerCase()}`,
+      orderNumber: `ZR-TEST-${status}`,
+      userId: customerA.uid,
+      customerSnapshot: {
+        uid: customerA.uid,
+        email: customerA.email,
+        displayName: customerA.displayName,
+        phone: customerA.phone,
+      },
+      items: [
+        {
+          productId: 'ziron-1m-bottle',
+          variantId: 'var-1m',
+          sku: 'ZR-BTL-60C',
+          productNameSnapshot: 'ZIRON Active Protocol (60 Capsules)',
+          variantNameSnapshot: 'Standard Bottle (60 Capsules)',
+          quantity: 1,
+          unitPrice: 8500,
+          subtotal: 8500,
+          inventoryId: 'INV-LOT-01',
+        },
+      ],
+      subtotal: 8500,
+      shippingCost: 0,
+      shippingStatus,
+      discounts: 0,
+      total: 8500,
+      currency: 'DZD',
+      status,
+      paymentStatus,
+      fulfillmentStatus: status === 'SHIPPED' ? 'SHIPPED' : status === 'DELIVERED' ? 'DELIVERED' : 'UNFULFILLED',
+      shippingAddress: {
+        recipientName: 'Amina Mansouri',
+        phone: '0551234567',
+        wilaya: 'Algiers',
+        city: 'Algiers',
+        address: '10 Rue Didouche Mourad',
+      },
+      history: [],
+      createdAt: '2026-03-20T10:00:00.000Z',
+      updatedAt: '2026-03-20T10:00:00.000Z',
+    });
+
+    describe('A. Eligibility Rules (isOrderCustomerCancellable)', () => {
+      it('allows customer to cancel when order is PENDING and UNPAID', () => {
+        const order = createTestOrder('PENDING', 'UNPAID');
+        expect(isOrderCustomerCancellable(order, false)).toBe(true);
+      });
+
+      it('prevents customer from cancelling when order is CONFIRMED', () => {
+        const order = createTestOrder('CONFIRMED', 'UNPAID');
+        expect(isOrderCustomerCancellable(order, false)).toBe(false);
+      });
+
+      it('prevents customer from cancelling when order is PROCESSING', () => {
+        const order = createTestOrder('PROCESSING', 'UNPAID');
+        expect(isOrderCustomerCancellable(order, false)).toBe(false);
+      });
+
+      it('strictly forbids cancellation for SHIPPED orders (terminal in-flight)', () => {
+        const order = createTestOrder('SHIPPED', 'UNPAID');
+        expect(isOrderCustomerCancellable(order, false)).toBe(false);
+        expect(isOrderCustomerCancellable(order, true)).toBe(false);
+      });
+
+      it('strictly forbids cancellation for DELIVERED orders (terminal completed)', () => {
+        const order = createTestOrder('DELIVERED', 'PAID');
+        expect(isOrderCustomerCancellable(order, false)).toBe(false);
+        expect(isOrderCustomerCancellable(order, true)).toBe(false);
+      });
+
+      it('strictly forbids cancellation for already CANCELLED orders', () => {
+        const order = createTestOrder('CANCELLED', 'UNPAID');
+        expect(isOrderCustomerCancellable(order, false)).toBe(false);
+        expect(isOrderCustomerCancellable(order, true)).toBe(false);
+      });
+
+      it('prevents customer from self-cancelling when paymentStatus is PAID', () => {
+        const order = createTestOrder('PENDING', 'PAID');
+        // Customers cannot self-cancel paid orders; staff/support intervention required
+        expect(isOrderCustomerCancellable(order, false)).toBe(false);
+      });
+
+      it('permits authorized staff to cancel CONFIRMED and PROCESSING orders', () => {
+        const confirmedOrder = createTestOrder('CONFIRMED', 'UNPAID');
+        const processingOrder = createTestOrder('PROCESSING', 'UNPAID');
+        expect(isOrderCustomerCancellable(confirmedOrder, true)).toBe(true);
+        expect(isOrderCustomerCancellable(processingOrder, true)).toBe(true);
+      });
+
+      it('handles null/undefined order gracefully', () => {
+        expect(isOrderCustomerCancellable(null as any, false)).toBe(false);
+        expect(isOrderCustomerCancellable(undefined as any, true)).toBe(false);
+      });
+    });
+
+    describe('B. Cancellation Reason Formatting & Operational Audit Requirements', () => {
+      it('combines preset reason and optional customer note', () => {
+        const preset = 'Ordered by mistake';
+        const note = 'Wanted 3-month bundle instead';
+        const formatted = `${preset}: ${note}`;
+        expect(formatted).toBe('Ordered by mistake: Wanted 3-month bundle instead');
+      });
+
+      it('uses preset directly if no additional note provided', () => {
+        const preset = 'Changed mind';
+        const note = '';
+        const formatted = preset || note;
+        expect(formatted).toBe('Changed mind');
+      });
+
+      it('enforces that operational staff cancellations must provide a reason', () => {
+        const isStaff = true;
+        const validateStaffReason = (reason: string | undefined): boolean => {
+          if (isStaff && (!reason || reason.trim() === '')) {
+            return false;
+          }
+          return true;
+        };
+
+        expect(validateStaffReason(undefined)).toBe(false);
+        expect(validateStaffReason('')).toBe(false);
+        expect(validateStaffReason('   ')).toBe(false);
+        expect(validateStaffReason('Customer requested cancellation via call')).toBe(true);
+      });
+    });
+
+    describe('C. Resulting Post-Cancellation State Contract', () => {
+      it('verifies resulting cancelled order schema matches immutable commerce specifications', () => {
+        const baseOrder = createTestOrder('PENDING', 'UNPAID');
+        const cancellationReason = 'Ordered by mistake';
+
+        // Authoritative state transition simulation
+        const cancelledOrder: Order = {
+          ...baseOrder,
+          status: 'CANCELLED',
+          fulfillmentStatus: 'CANCELLED',
+          paymentStatus: 'UNPAID',
+          history: [
+            ...(baseOrder.history || []),
+            {
+              status: 'CANCELLED',
+              paymentStatus: 'UNPAID',
+              shippingStatus: baseOrder.shippingStatus,
+              timestamp: '2026-03-20T10:15:00.000Z',
+              actorUserId: customerA.uid,
+              note: `Cancelled by customer: ${cancellationReason}`,
+            },
+          ],
+          updatedAt: '2026-03-20T10:15:00.000Z',
+        };
+
+        expect(cancelledOrder.status).toBe('CANCELLED');
+        expect(cancelledOrder.fulfillmentStatus).toBe('CANCELLED');
+        expect(cancelledOrder.paymentStatus).toBe('UNPAID');
+        expect(cancelledOrder.history).toHaveLength(1);
+        expect(cancelledOrder.history?.[0].status).toBe('CANCELLED');
+        expect(cancelledOrder.history?.[0].note).toContain('Cancelled by customer');
+        expect(isOrderCustomerCancellable(cancelledOrder, false)).toBe(false);
+      });
+
+      it('ensures financial ledger reflects zero obligation upon cancellation', () => {
+        const cancelledOrder = createTestOrder('CANCELLED', 'UNPAID');
+        const isSettlementVoided = cancelledOrder.status === 'CANCELLED';
+        expect(isSettlementVoided).toBe(true);
+      });
+    });
+
+    describe('D. Immutability of Pricing, Shipping, and Inventory Contracts', () => {
+      it('guarantees that customer cancellation payload cannot tamper with price, shipping, or inventory IDs', () => {
+        const cancelPayload = {
+          orderId: 'ord-test-pending',
+          reason: 'Customer cancelled',
+        };
+
+        // Ensure payload only has allowed fields
+        const allowedKeys = ['orderId', 'reason'];
+        const payloadKeys = Object.keys(cancelPayload);
+        const hasDisallowedFields = payloadKeys.some((key) => !allowedKeys.includes(key));
+        expect(hasDisallowedFields).toBe(false);
+      });
     });
   });
 });

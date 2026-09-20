@@ -2,8 +2,14 @@ import React, { useState, useEffect } from 'react';
 import { useAuth } from '@/context/AuthContext';
 import { useI18n } from '@/context/I18nContext';
 import { Button } from '@/components/design-system/Button';
+import { Modal } from '@/components/design-system/Modal';
 import { GridPattern } from '@/components/design-system/GridPattern';
-import { getCustomerOrders, getOrderById } from '@/services/commerce/orderService';
+import {
+  getCustomerOrders,
+  getOrderById,
+  cancelOrder,
+  isOrderCustomerCancellable,
+} from '@/services/commerce/orderService';
 import { formatDzdPrice } from '@/services/commerce/pricingService';
 import { Order, OrderStatus, PaymentStatus, ShippingStatus } from '@/types/commerce';
 import {
@@ -13,6 +19,8 @@ import {
   Truck,
   CheckCircle2,
   AlertCircle,
+  AlertTriangle,
+  XCircle,
   Calendar,
   CreditCard,
   RefreshCw,
@@ -34,6 +42,39 @@ interface CustomerOrdersPageProps {
   orderId?: string;
 }
 
+const CANCELLATION_PRESET_REASONS = [
+  {
+    id: 'ORDERED_BY_MISTAKE',
+    labelEn: 'Ordered by mistake',
+    labelFr: 'Commandé par erreur',
+    labelAr: 'تم الطلب بالخطأ',
+  },
+  {
+    id: 'CHANGED_MIND',
+    labelEn: 'Changed mind',
+    labelFr: "J'ai changé d'avis",
+    labelAr: 'تراجعت عن الشراء',
+  },
+  {
+    id: 'UPDATE_DETAILS',
+    labelEn: 'Need to modify items or delivery address',
+    labelFr: "Besoin de modifier l'adresse ou les articles",
+    labelAr: 'رغبة في تعديل المنتجات أو عنوان التوصيل',
+  },
+  {
+    id: 'FOUND_BETTER_OPTION',
+    labelEn: 'Alternative choice / Delivery timing issue',
+    labelFr: 'Délai de livraison / Autre alternative',
+    labelAr: 'وقت التوصيل غير مناسب / خيار بديل',
+  },
+  {
+    id: 'OTHER',
+    labelEn: 'Other reason',
+    labelFr: 'Autre motif',
+    labelAr: 'سبب آخر',
+  },
+];
+
 export const CustomerOrdersPage: React.FC<CustomerOrdersPageProps> = ({ orderId }) => {
   const { user, profile } = useAuth();
   const { navigate, locale, dir } = useI18n();
@@ -42,7 +83,21 @@ export const CustomerOrdersPage: React.FC<CustomerOrdersPageProps> = ({ orderId 
   const [loading, setLoading] = useState(true);
   const [selectedOrder, setSelectedOrder] = useState<Order | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
+  const [actionSuccess, setActionSuccess] = useState<string | null>(null);
   const [unauthorizedError, setUnauthorizedError] = useState(false);
+
+  // Customer Cancellation Workflow State
+  const [isCancelModalOpen, setIsCancelModalOpen] = useState(false);
+  const [selectedPresetReason, setSelectedPresetReason] = useState<string>('');
+  const [cancelNote, setCancelNote] = useState<string>('');
+  const [cancelling, setCancelling] = useState(false);
+  const [cancellationError, setCancellationError] = useState<string | null>(null);
+
+  const isStaff = Boolean(
+    profile?.roles?.some((r: string) =>
+      ['SUPER_ADMIN', 'ADMIN', 'ORDER_MANAGER'].includes(r)
+    )
+  );
 
   const loadCustomerOrders = async (targetOrderId?: string) => {
     if (!user?.uid) {
@@ -118,6 +173,86 @@ export const CustomerOrdersPage: React.FC<CustomerOrdersPageProps> = ({ orderId 
 
   const handleBackToList = () => {
     navigate('app/orders');
+  };
+
+  const getPresetLabel = (presetId: string) => {
+    const preset = CANCELLATION_PRESET_REASONS.find((p) => p.id === presetId);
+    if (!preset) return '';
+    return locale === 'ar' ? preset.labelAr : locale === 'fr' ? preset.labelFr : preset.labelEn;
+  };
+
+  const handleOpenCancellationModal = (orderToCancel?: Order) => {
+    if (orderToCancel) {
+      setSelectedOrder(orderToCancel);
+    }
+    setSelectedPresetReason('');
+    setCancelNote('');
+    setCancellationError(null);
+    setIsCancelModalOpen(true);
+  };
+
+  const handleConfirmCancellation = async () => {
+    if (!selectedOrder) return;
+
+    const presetLabel = selectedPresetReason ? getPresetLabel(selectedPresetReason) : '';
+    const trimmedNote = cancelNote.trim();
+
+    let finalReason = '';
+    if (presetLabel && trimmedNote) {
+      finalReason = `${presetLabel}: ${trimmedNote}`;
+    } else if (presetLabel) {
+      finalReason = presetLabel;
+    } else if (trimmedNote) {
+      finalReason = trimmedNote;
+    }
+
+    if (isStaff && !finalReason) {
+      setCancellationError(
+        locale === 'ar'
+          ? 'سبب الإلغاء مطلوب إلزامياً للعمليات الإدارية.'
+          : locale === 'fr'
+          ? "Le motif d'annulation est requis par le protocole opérationnel."
+          : 'A cancellation reason is strictly required by protocol for operational audits.'
+      );
+      return;
+    }
+
+    setCancelling(true);
+    setCancellationError(null);
+    setActionError(null);
+
+    try {
+      const res = await cancelOrder(selectedOrder.id, finalReason || undefined);
+      if (res && res.order) {
+        setSelectedOrder(res.order);
+        setOrders((prev) => prev.map((o) => (o.id === res.order.id ? res.order : o)));
+      } else {
+        await loadCustomerOrders(selectedOrder.id);
+      }
+
+      setIsCancelModalOpen(false);
+      setSelectedPresetReason('');
+      setCancelNote('');
+      setActionSuccess(
+        locale === 'ar'
+          ? `تم إلغاء الطلب (${selectedOrder.orderNumber}) بنجاح وتحرير المخزون المحجوز.`
+          : locale === 'fr'
+          ? `La commande (${selectedOrder.orderNumber}) a été annulée avec succès.`
+          : `Order (${selectedOrder.orderNumber}) has been successfully cancelled and stock restored.`
+      );
+    } catch (err: any) {
+      console.error('Cancellation error:', err);
+      setCancellationError(
+        err?.message ||
+          (locale === 'ar'
+            ? 'تعذر إلغاء الطلب من الخادم. يرجى التحقق من حالة الطلب أو التواصل مع الدعم.'
+            : locale === 'fr'
+            ? "Impossible d'annuler la commande. Veuillez vérifier son état ou contacter le support."
+            : 'Unable to cancel order. Please verify order status or contact customer support.')
+      );
+    } finally {
+      setCancelling(false);
+    }
   };
 
   const getOrderStatusBadge = (status: OrderStatus) => {
@@ -305,6 +440,26 @@ export const CustomerOrdersPage: React.FC<CustomerOrdersPageProps> = ({ orderId 
           </div>
         </div>
 
+        {/* Action / Success Notification */}
+        {actionSuccess && (
+          <div
+            className="p-4 border rounded-lg text-xs flex items-center justify-between bg-emerald-50 border-emerald-200 text-emerald-800"
+            id="customer-order-action-success"
+          >
+            <div className="flex items-center gap-2">
+              <CheckCircle2 className="w-4 h-4 shrink-0 text-emerald-600" />
+              <span>{actionSuccess}</span>
+            </div>
+            <button
+              onClick={() => setActionSuccess(null)}
+              className="hover:underline text-xs ml-4 cursor-pointer font-bold"
+              aria-label="Dismiss message"
+            >
+              ×
+            </button>
+          </div>
+        )}
+
         {/* Action / Error Notification */}
         {actionError && (
           <div
@@ -451,6 +606,23 @@ export const CustomerOrdersPage: React.FC<CustomerOrdersPageProps> = ({ orderId 
                           </div>
                         </div>
                       </div>
+
+                      {/* Quick Cancellation Action for Cancellable Orders */}
+                      {isOrderCustomerCancellable(ord, isStaff) && (
+                        <div className="pt-2 flex justify-end border-t border-gray-100 mt-2">
+                          <button
+                            id={`btn-list-cancel-${ord.id}`}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleOpenCancellationModal(ord);
+                            }}
+                            className="inline-flex items-center gap-1 text-[11px] font-semibold text-red-600 hover:text-red-800 hover:underline cursor-pointer"
+                          >
+                            <XCircle className="w-3 h-3 text-red-600" />
+                            <span>{locale === 'ar' ? 'إلغاء الطلب' : locale === 'fr' ? 'Annuler' : 'Cancel Order'}</span>
+                          </button>
+                        </div>
+                      )}
                     </div>
                   );
                 })}
@@ -492,6 +664,29 @@ export const CustomerOrdersPage: React.FC<CustomerOrdersPageProps> = ({ orderId 
                       <span>VIREXON SECURE LEDGER</span>
                     </div>
                   </div>
+
+                  {/* Formally Cancelled Banner */}
+                  {selectedOrder.status === 'CANCELLED' && (
+                    <div className="p-4 bg-red-50 border border-red-200 rounded-xl space-y-1.5" id="order-cancelled-banner">
+                      <div className="flex items-center gap-2 text-red-900 font-bold text-xs">
+                        <XCircle className="w-4 h-4 text-red-600 shrink-0" />
+                        <span>
+                          {locale === 'ar'
+                            ? 'تم إلغاء هذا الطلب رسمياً'
+                            : locale === 'fr'
+                            ? 'Cette commande a été officiellement annulée'
+                            : 'Order Formally Cancelled'}
+                        </span>
+                      </div>
+                      <p className="text-xs text-red-800 leading-relaxed">
+                        {locale === 'ar'
+                          ? 'تم إلغاء هذا الطلب ولا توجد أي التزامات شحن أو دفع. تم تحرير المخزون المحجوز بنجاح في النظام.'
+                          : locale === 'fr'
+                          ? 'Cette commande a été annulée. Aucun paiement ni livraison n’aura lieu, et les articles réservés ont été restaurés.'
+                          : 'This order has been cancelled. No shipment or payment collection will occur, and reserved stock has been authoritatively restored.'}
+                      </p>
+                    </div>
+                  )}
 
                   {/* Prominent Shipping Negotiation Notice */}
                   {selectedOrder.shippingStatus === 'NEGOTIATION_REQUIRED' && (
@@ -719,6 +914,18 @@ export const CustomerOrdersPage: React.FC<CustomerOrdersPageProps> = ({ orderId 
                       <span className="font-mono text-lg">{formatDzdPrice(selectedOrder.total)}</span>
                     </div>
 
+                    {selectedOrder.status === 'CANCELLED' && (
+                      <div className="pt-2 border-t border-red-200 flex items-center justify-between text-xs font-bold text-red-700" id="ledger-cancellation-notice">
+                        <div className="flex items-center gap-1.5">
+                          <XCircle className="w-3.5 h-3.5 text-red-600" />
+                          <span>{locale === 'ar' ? 'حالة المعاملة:' : locale === 'fr' ? 'Statut de règlement :' : 'Settlement Status:'}</span>
+                        </div>
+                        <span className="font-mono">
+                          {locale === 'ar' ? 'ملغى (0 د.ج)' : locale === 'fr' ? 'Annulé (0 DZD)' : 'Void / Cancelled (0 DZD)'}
+                        </span>
+                      </div>
+                    )}
+
                     <div className="text-[10px] text-gray-500 italic pt-1">
                       {locale === 'ar'
                         ? '* طريقة الدفع: الدفع عند الاستلام (COD) نقداً لمندوب التوصيل.'
@@ -727,6 +934,81 @@ export const CustomerOrdersPage: React.FC<CustomerOrdersPageProps> = ({ orderId 
                         : '* Payment Method: Cash on Delivery (COD) upon physical receipt of package.'}
                     </div>
                   </div>
+
+                  {/* Customer Order Actions: Cancellation Control / Terminal State Notice */}
+                  {isOrderCustomerCancellable(selectedOrder, isStaff) && (
+                    <div
+                      className="p-4 sm:p-5 bg-white border border-red-200 rounded-xl flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 shadow-2xs"
+                      id="customer-order-cancellation-card"
+                    >
+                      <div className="space-y-1">
+                        <div className="flex items-center gap-2 text-xs font-bold text-gray-900">
+                          <AlertTriangle className="w-4 h-4 text-amber-600 shrink-0" />
+                          <span>
+                            {locale === 'ar'
+                              ? 'إلغاء الطلب قبل المراجعة والتجهيز'
+                              : locale === 'fr'
+                              ? 'Annulation de la commande'
+                              : 'Order Cancellation Option'}
+                          </span>
+                        </div>
+                        <p className="text-[11px] text-gray-600 leading-relaxed max-w-lg">
+                          {locale === 'ar'
+                            ? 'طالما أن طلبك لا يزال قيد المراجعة ولم يدخل حيز التجهيز للشحن، يمكنك إلغاؤه بنقرة واحدة.'
+                            : locale === 'fr'
+                            ? 'Tant que votre commande est en attente, vous pouvez l’annuler directement et libérer les articles.'
+                            : 'As this order is currently pending review, you may cancel it directly and release the reserved items.'}
+                        </p>
+                      </div>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        id="btn-customer-cancel-order"
+                        onClick={() => handleOpenCancellationModal()}
+                        className="text-red-600 border-red-300 hover:bg-red-50 hover:text-red-700 shrink-0 text-xs font-semibold cursor-pointer"
+                      >
+                        <XCircle className="w-3.5 h-3.5 mr-1.5 rtl:ml-1.5 rtl:mr-0 text-red-600" />
+                        <span>{locale === 'ar' ? 'إلغاء هذا الطلب' : locale === 'fr' ? 'Annuler la commande' : 'Cancel Order'}</span>
+                      </Button>
+                    </div>
+                  )}
+
+                  {!isOrderCustomerCancellable(selectedOrder, isStaff) && selectedOrder.status !== 'CANCELLED' && (
+                    <div
+                      className="p-3.5 bg-gray-50 border border-gray-200 rounded-lg flex items-start gap-2.5 text-xs text-gray-600"
+                      id="customer-order-cancellation-locked-notice"
+                    >
+                      <Info className="w-4 h-4 text-gray-500 shrink-0 mt-0.5" />
+                      <div className="space-y-0.5">
+                        <div className="font-semibold text-gray-800">
+                          {locale === 'ar'
+                            ? 'إلغاء الطلب الذاتي غير متاح:'
+                            : locale === 'fr'
+                            ? 'Annulation en ligne verrouillée :'
+                            : 'Self-Service Cancellation Unavailable:'}
+                        </div>
+                        <p className="text-[11px] leading-relaxed text-gray-600">
+                          {selectedOrder.status === 'SHIPPED' || selectedOrder.status === 'DELIVERED'
+                            ? (locale === 'ar'
+                                ? 'تم شحن هذا الطلب أو توصيله بالفعل ولا يمكن إلغاؤه إلكترونياً.'
+                                : locale === 'fr'
+                                ? 'Cette commande a déjà été expédiée ou livrée et ne peut plus être annulée en ligne.'
+                                : 'This order has already been shipped or delivered and cannot be cancelled online.')
+                            : selectedOrder.paymentStatus === 'PAID'
+                            ? (locale === 'ar'
+                                ? 'تم دفع قيمة هذا الطلب. يرجى التواصل مع فريق الدعم للمساعدة في الاسترجاع.'
+                                : locale === 'fr'
+                                ? 'Cette commande a été réglée. Veuillez contacter le support pour toute demande de remboursement.'
+                                : 'Payment has already settled for this order. Please contact customer support for refund assistance.')
+                            : (locale === 'ar'
+                                ? `الطلب حالياً في حالة (${selectedOrder.status}) وتجري معالجته في المستودع. للتعديل أو الاستفسار يرجى التواصل مع خدمة الزبائن.`
+                                : locale === 'fr'
+                                ? `La commande est en statut (${selectedOrder.status}) et est en cours de traitement. Contactez le service client pour toute assistance.`
+                                : `Order is currently in ${selectedOrder.status} status and being fulfilled. Please contact customer support for changes.`)}
+                        </p>
+                      </div>
+                    </div>
+                  )}
 
                   {/* Order History / Audit Timeline */}
                   <div className="space-y-3 pt-2">
@@ -818,6 +1100,156 @@ export const CustomerOrdersPage: React.FC<CustomerOrdersPageProps> = ({ orderId 
           </div>
         )}
       </div>
+
+      {/* Cancellation Confirmation Modal */}
+      <Modal
+        isOpen={isCancelModalOpen}
+        onClose={() => {
+          if (!cancelling) {
+            setIsCancelModalOpen(false);
+            setCancellationError(null);
+          }
+        }}
+        title={
+          locale === 'ar'
+            ? 'تأكيد إلغاء الطلب'
+            : locale === 'fr'
+            ? 'Confirmer l’annulation de la commande'
+            : 'Confirm Order Cancellation'
+        }
+        maxWidth="md"
+      >
+        {selectedOrder && (
+          <div className="space-y-4 text-left rtl:text-right" id="cancel-order-modal-content">
+            <div className="p-3 bg-red-50/70 border border-red-100 rounded-lg space-y-1">
+              <div className="flex items-center justify-between text-xs">
+                <span className="font-mono font-bold text-[#0B2346]">{selectedOrder.orderNumber}</span>
+                <span className="font-mono font-bold text-[#0B2346]">{formatDzdPrice(selectedOrder.total)}</span>
+              </div>
+              <div className="text-[11px] text-gray-600">
+                {selectedOrder.items.length}{' '}
+                {selectedOrder.items.length === 1
+                  ? (locale === 'ar' ? 'منتج' : locale === 'fr' ? 'article' : 'item')
+                  : (locale === 'ar' ? 'منتجات' : locale === 'fr' ? 'articles' : 'items')}
+                {' · '}
+                <span>{selectedOrder.shippingAddress.wilaya}</span>
+              </div>
+            </div>
+
+            <p className="text-xs text-gray-600 leading-relaxed">
+              {locale === 'ar'
+                ? 'هل أنت متأكد من رغبتك في إلغاء هذا الطلب؟ بمجرد الإلغاء، سيتم تحرير المخزون المحجوز فورياً ولن يتم شحن المنتجات.'
+                : locale === 'fr'
+                ? 'Êtes-vous sûr de vouloir annuler cette commande ? Une fois annulée, les stocks réservés seront libérés et la commande ne sera pas expédiée.'
+                : 'Are you sure you wish to cancel this order? Once cancelled, reserved inventory is immediately returned and the package will not be dispatched.'}
+            </p>
+
+            {/* Preset Reasons */}
+            <div className="space-y-2">
+              <label className="block text-xs font-semibold text-gray-700">
+                {locale === 'ar'
+                  ? 'سبب الإلغاء:'
+                  : locale === 'fr'
+                  ? 'Motif d’annulation :'
+                  : 'Cancellation Reason:'}
+                {isStaff && <span className="text-red-500 ml-1 rtl:mr-1">*</span>}
+              </label>
+              <div className="space-y-1.5">
+                {CANCELLATION_PRESET_REASONS.map((preset) => (
+                  <label
+                    key={preset.id}
+                    className={`flex items-center gap-2.5 p-2 rounded-lg border text-xs cursor-pointer transition-colors ${
+                      selectedPresetReason === preset.id
+                        ? 'border-[#0B2346] bg-blue-50/50 text-[#0B2346] font-medium'
+                        : 'border-gray-200 hover:bg-gray-50 text-gray-700'
+                    }`}
+                  >
+                    <input
+                      type="radio"
+                      name="cancelReasonPreset"
+                      id={`cancel-preset-${preset.id}`}
+                      checked={selectedPresetReason === preset.id}
+                      onChange={() => setSelectedPresetReason(preset.id)}
+                      disabled={cancelling}
+                      className="text-[#0B2346] focus:ring-[#0B2346]"
+                    />
+                    <span>
+                      {locale === 'ar' ? preset.labelAr : locale === 'fr' ? preset.labelFr : preset.labelEn}
+                    </span>
+                  </label>
+                ))}
+              </div>
+            </div>
+
+            {/* Custom Note */}
+            <div className="space-y-1.5">
+              <label className="block text-xs font-semibold text-gray-700">
+                {locale === 'ar'
+                  ? 'ملاحظات إضافية (اختياري):'
+                  : locale === 'fr'
+                  ? 'Précisions supplémentaires (optionnel) :'
+                  : 'Additional Details (Optional):'}
+              </label>
+              <textarea
+                id="input-cancellation-note"
+                value={cancelNote}
+                onChange={(e) => setCancelNote(e.target.value)}
+                disabled={cancelling}
+                placeholder={
+                  locale === 'ar'
+                    ? 'أدخل أي ملاحظة أو سبب إضافي...'
+                    : locale === 'fr'
+                    ? 'Indiquez un détail supplémentaire si nécessaire...'
+                    : 'Provide any additional context regarding your cancellation...'
+                }
+                className="w-full text-xs p-2.5 border border-gray-300 rounded-lg focus:ring-1 focus:ring-[#0B2346] focus:border-[#0B2346] outline-none min-h-[70px] resize-none"
+              />
+            </div>
+
+            {/* Error Message */}
+            {cancellationError && (
+              <div className="p-3 bg-red-50 border border-red-200 rounded-lg text-xs text-red-700 flex items-start gap-2" id="cancellation-modal-error">
+                <AlertCircle className="w-4 h-4 shrink-0 mt-0.5 text-red-600" />
+                <span>{cancellationError}</span>
+              </div>
+            )}
+
+            {/* Action Buttons */}
+            <div className="pt-2 flex items-center justify-end gap-2.5">
+              <Button
+                variant="outline"
+                size="sm"
+                id="btn-dismiss-cancel-modal"
+                onClick={() => setIsCancelModalOpen(false)}
+                disabled={cancelling}
+                className="text-xs"
+              >
+                {locale === 'ar' ? 'الاحتفاظ بالطلب' : locale === 'fr' ? 'Garder la commande' : 'Keep Order'}
+              </Button>
+              <Button
+                variant="danger"
+                size="sm"
+                id="btn-confirm-cancel-order"
+                onClick={handleConfirmCancellation}
+                disabled={cancelling || (isStaff && !selectedPresetReason && !cancelNote.trim())}
+                className="bg-red-600 hover:bg-red-700 text-white text-xs font-semibold cursor-pointer"
+              >
+                {cancelling ? (
+                  <span className="flex items-center gap-1.5">
+                    <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                    <span>{locale === 'ar' ? 'جاري الإلغاء...' : locale === 'fr' ? 'Annulation...' : 'Cancelling...'}</span>
+                  </span>
+                ) : (
+                  <span className="flex items-center gap-1.5">
+                    <XCircle className="w-3.5 h-3.5" />
+                    <span>{locale === 'ar' ? 'تأكيد الإلغاء' : locale === 'fr' ? 'Confirmer l’annulation' : 'Confirm Cancellation'}</span>
+                  </span>
+                )}
+              </Button>
+            </div>
+          </div>
+        )}
+      </Modal>
     </div>
   );
 };

@@ -94,6 +94,28 @@ export async function cancelOrder(orderId: string, reason?: string): Promise<{ s
 }
 
 /**
+ * Checks whether an order can be cancelled by a customer (or staff) under authoritative commerce rules.
+ * Customers: only PENDING & UNPAID orders may be cancelled online.
+ * Staff: pre-shipped orders (PENDING, CONFIRMED, PROCESSING) may be cancelled with mandatory reason.
+ * Terminal states (CANCELLED, SHIPPED, DELIVERED) cannot be cancelled.
+ */
+export function isOrderCustomerCancellable(
+  order: Pick<Order, 'status' | 'paymentStatus'> | null | undefined,
+  isStaff: boolean = false
+): boolean {
+  if (!order) return false;
+  if (order.status === 'CANCELLED' || order.status === 'SHIPPED' || order.status === 'DELIVERED') {
+    return false;
+  }
+  if (isStaff) {
+    return ['PENDING', 'CONFIRMED', 'PROCESSING'].includes(order.status);
+  }
+  // Normal customer contract: only PENDING and UNPAID orders
+  const isUnpaid = order.paymentStatus === 'UNPAID' || !order.paymentStatus;
+  return order.status === 'PENDING' && isUnpaid;
+}
+
+/**
  * Admin: Loads all orders with optional status filters
  */
 export async function getAllOrdersAdmin(filters?: {
