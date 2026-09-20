@@ -236,7 +236,15 @@ function RouterOutlet() {
   // Customer application routes routed through CustomerAppShell
   if (route.startsWith('app')) {
     let appContent: React.ReactNode;
-    switch (route) {
+    if (route.startsWith('app/orders/')) {
+      const orderId = route.substring('app/orders/'.length);
+      appContent = (
+        <CustomerRouteGuard>
+          <CustomerOrdersPage orderId={orderId} />
+        </CustomerRouteGuard>
+      );
+    } else {
+      switch (route) {
       case 'app/journey':
         appContent = (
           <CustomerRouteGuard>
@@ -347,6 +355,7 @@ function RouterOutlet() {
           );
         }
         break;
+      }
     }
 
     return <CustomerAppShell>{appContent}</CustomerAppShell>;

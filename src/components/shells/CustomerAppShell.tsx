@@ -346,6 +346,7 @@ export const CustomerAppShell: React.FC<{ children: React.ReactNode }> = ({ chil
               {CUSTOMER_NAV_ITEMS.map((item) => {
                 const isActive =
                   route === item.id ||
+                  (item.id === 'app/orders' && route.startsWith('app/orders')) ||
                   (item.id === 'app/school' && (route.startsWith('app/school') && route !== 'app/school/certificates')) ||
                   (item.id === 'app/certificates' && route === 'app/school/certificates');
                 const isGated =
@@ -436,6 +437,7 @@ export const CustomerAppShell: React.FC<{ children: React.ReactNode }> = ({ chil
               {CUSTOMER_NAV_ITEMS.map((item) => {
                 const isActive =
                   route === item.id ||
+                  (item.id === 'app/orders' && route.startsWith('app/orders')) ||
                   (item.id === 'app/school' && (route.startsWith('app/school') && route !== 'app/school/certificates')) ||
                   (item.id === 'app/certificates' && route === 'app/school/certificates');
                 const isGated =

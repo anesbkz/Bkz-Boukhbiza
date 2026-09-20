@@ -22,6 +22,7 @@ export type PublicRoute =
   | 'app/products'
   | 'app/products/activate'
   | 'app/orders'
+  | `app/orders/${string}`
   | 'app/community'
   | 'app/school'
   | 'app/school/courses'
