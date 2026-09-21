@@ -9,6 +9,7 @@ export default defineConfig(() => {
     define: {
       __BUILD_SHA__: JSON.stringify(process.env.VITE_BUILD_SHA || process.env.GITHUB_SHA || ''),
       __BUILD_TIME__: JSON.stringify(process.env.VITE_BUILD_TIME || ''),
+      __BOOTSTRAP_SUPERADMIN_EMAIL__: JSON.stringify(process.env.BOOTSTRAP_SUPERADMIN_EMAIL || process.env.VITE_BOOTSTRAP_SUPERADMIN_EMAIL || ''),
     },
     resolve: {
       alias: {

@@ -141,6 +141,29 @@ export async function invokeBootstrapGovernance(): Promise<{ success: boolean; m
   return result.data;
 }
 
+/**
+ * Detects the configured bootstrap super admin email.
+ * Evaluates environment configuration securely without hardcoding.
+ */
+export function getBootstrapOwnerEmail(): string | null {
+  const email = (
+    (typeof import.meta !== 'undefined' && import.meta.env?.VITE_BOOTSTRAP_SUPERADMIN_EMAIL) ||
+    (typeof __BOOTSTRAP_SUPERADMIN_EMAIL__ !== 'undefined' ? __BOOTSTRAP_SUPERADMIN_EMAIL__ : '') ||
+    ''
+  ).toLowerCase().trim();
+  return email || null;
+}
+
+/**
+ * Validates whether the specified email matches the detected bootstrap owner identity.
+ */
+export function isBootstrapOwner(email?: string | null): boolean {
+  if (!email) return false;
+  const targetEmail = getBootstrapOwnerEmail();
+  if (!targetEmail) return false;
+  return email.toLowerCase().trim() === targetEmail;
+}
+
 export async function updateSafeProfileFields(
   uid: string,
   fields: CustomerProfileUpdatePayload,

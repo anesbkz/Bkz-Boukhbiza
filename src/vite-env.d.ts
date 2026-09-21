@@ -2,6 +2,7 @@
 
 declare const __BUILD_SHA__: string;
 declare const __BUILD_TIME__: string;
+declare const __BOOTSTRAP_SUPERADMIN_EMAIL__: string;
 
 interface ImportMetaEnv {
   readonly VITE_FIREBASE_API_KEY?: string;
@@ -11,6 +12,7 @@ interface ImportMetaEnv {
   readonly VITE_FIREBASE_MESSAGING_SENDER_ID?: string;
   readonly VITE_FIREBASE_APP_ID?: string;
   readonly VITE_FIREBASE_DATABASE_ID?: string;
+  readonly VITE_BOOTSTRAP_SUPERADMIN_EMAIL?: string;
   readonly VITE_BUILD_SHA?: string;
   readonly VITE_BUILD_TIME?: string;
   readonly [key: string]: string | boolean | undefined;

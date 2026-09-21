@@ -4,6 +4,8 @@ import { useI18n } from '@/context/I18nContext';
 import { AppPermission } from '@/types/rbac';
 import { ShieldAlert, Lock, ArrowLeft } from 'lucide-react';
 import { GridPattern } from '@/components/design-system/GridPattern';
+import { isBootstrapOwner } from '@/services/userService';
+import { AdminBootstrapAction } from '@/components/admin/AdminBootstrapAction';
 
 interface AdminRouteGuardProps {
   requiredPermission?: AppPermission;
@@ -28,6 +30,8 @@ export const AdminRouteGuard: React.FC<AdminRouteGuardProps> = ({
 
   // 1. Unauthenticated or Non-staff
   if (!user || !isStaff) {
+    const isOwner = user ? isBootstrapOwner(user.email) : false;
+
     return (
       <div className="bg-white border border-[#E2E8F0] p-8 max-w-lg mx-auto text-center relative overflow-hidden my-8">
         <GridPattern />
@@ -44,6 +48,14 @@ export const AdminRouteGuard: React.FC<AdminRouteGuardProps> = ({
           <p className="text-xs text-gray-600 leading-relaxed mb-6">
             Direct navigation to this operational command route is prohibited. Your account does not possess active staff or administrative clearance.
           </p>
+
+          {/* Initial Super Admin Bootstrap Action */}
+          {isOwner && (
+            <div className="mb-6 text-left">
+              <AdminBootstrapAction />
+            </div>
+          )}
+
           <div className="flex justify-center gap-3">
             <button
               onClick={() => navigate('')}

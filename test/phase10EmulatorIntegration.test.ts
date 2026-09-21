@@ -10,7 +10,28 @@ import {
 } from '@firebase/rules-unit-testing';
 import * as fs from 'fs';
 import * as path from 'path';
+import * as child_process from 'child_process';
 import { doc, getDoc, setDoc, updateDoc } from 'firebase/firestore';
+
+function isPortOpenSync(port: number, host = '127.0.0.1'): boolean {
+  try {
+    child_process.execSync(
+      `node -e "const net = require('net'); const s = net.connect(${port}, '${host}'); s.on('connect', () => process.exit(0)); s.on('error', () => process.exit(1));"`,
+      { timeout: 800, stdio: 'ignore' }
+    );
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+const isEmulatorActive = isPortOpenSync(8085);
+if (!isEmulatorActive) {
+  console.warn(
+    '\n[NOTICE] Firestore Emulator is not running on 127.0.0.1:8085. Skipping test/phase10EmulatorIntegration.test.ts.\n'
+  );
+}
+const describeEmulator = isEmulatorActive ? describe : describe.skip;
 
 const PROJECT_ID = 'ziron-commerce-emulator-audit';
 const DATABASE_ID =
@@ -20,7 +41,7 @@ const DATABASE_ID =
 process.env.GCLOUD_PROJECT = PROJECT_ID;
 process.env.FIRESTORE_EMULATOR_HOST = '127.0.0.1:8085';
 
-describe('PHASE 10.4.1 — REAL FIREBASE EMULATOR INTEGRATION LAYER', () => {
+describeEmulator('PHASE 10.4.1 — REAL FIREBASE EMULATOR INTEGRATION LAYER', () => {
   let adminDb: FirebaseFirestore.Firestore;
   let testEnv: any;
   let rulesTestEnv: RulesTestEnvironment;

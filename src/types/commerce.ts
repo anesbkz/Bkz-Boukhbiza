@@ -47,6 +47,7 @@ export interface Product {
   description: MultilingualText;
   shortDescription: MultilingualText;
   brand: string;
+  category?: string;
   status: ProductStatus;
   productType: ProductType;
   images: string[];
@@ -108,6 +109,7 @@ export interface InventoryRecord {
   soldQuantity: number;
   lowStockThreshold: number;
   status: InventoryStatus;
+  createdAt?: string;
   updatedAt: string;
 }
 
@@ -265,4 +267,18 @@ export interface CreateVariantPayload {
   initialStock?: number;
   lowStockThreshold?: number;
   inventoryId?: string;
+}
+
+export interface SeedCommerceRequest {
+  initialStock?: number;
+  lowStockThreshold?: number;
+}
+
+export interface SeedCommerceResult {
+  success: boolean;
+  message: string;
+  seededProducts: string[];
+  seededVariants: string[];
+  createdInventory: string[];
+  preservedInventory: string[];
 }

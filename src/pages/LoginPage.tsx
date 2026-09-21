@@ -4,11 +4,13 @@ import { useAuth } from '@/context/AuthContext';
 import { Button } from '@/components/design-system/Button';
 import { Input } from '@/components/design-system/Input';
 import { GridPattern } from '@/components/design-system/GridPattern';
+import { isBootstrapOwner } from '@/services/userService';
+import { AdminBootstrapAction } from '@/components/admin/AdminBootstrapAction';
 import { Lock, ArrowRight, Shield, AlertCircle, Loader2 } from 'lucide-react';
 
 export const LoginPage: React.FC = () => {
   const { navigate } = useI18n();
-  const { login, isStaff } = useAuth();
+  const { user, login, isStaff } = useAuth();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
@@ -21,8 +23,9 @@ export const LoginPage: React.FC = () => {
 
     try {
       await login(email, password);
-      // If staff, navigate to admin command center; otherwise to app dashboard
-      navigate(isStaff ? 'admin' : 'app');
+      // If staff or bootstrap owner, navigate to admin command center; otherwise to app dashboard
+      const isOwner = isBootstrapOwner(email);
+      navigate(isStaff || isOwner ? 'admin' : 'app');
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : 'Authentication failed';
       if (msg.includes('auth/invalid-credential') || msg.includes('auth/user-not-found') || msg.includes('auth/wrong-password')) {
@@ -36,6 +39,8 @@ export const LoginPage: React.FC = () => {
       setLoading(false);
     }
   };
+
+  const isCurrentBootstrapOwner = user ? isBootstrapOwner(user.email) : false;
 
   return (
     <div className="py-16 bg-[#F5F7FA]">
@@ -58,6 +63,12 @@ export const LoginPage: React.FC = () => {
         <div className="bg-white border border-[#E2E8F0] p-6 sm:p-8 shadow-sm relative">
           <GridPattern />
           <div className="relative z-10">
+            {isCurrentBootstrapOwner && !isStaff && (
+              <div className="mb-6">
+                <AdminBootstrapAction />
+              </div>
+            )}
+
             {errorMessage && (
               <div className="mb-4 p-3 bg-red-50 border border-red-200 text-xs text-red-700 flex items-start gap-2">
                 <AlertCircle className="w-4 h-4 text-red-600 shrink-0 mt-0.5" />

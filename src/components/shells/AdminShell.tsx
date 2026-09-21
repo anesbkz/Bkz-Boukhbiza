@@ -4,6 +4,8 @@ import { useI18n } from '@/context/I18nContext';
 import { AppPermission } from '@/types/rbac';
 import { PublicRoute } from '@/types';
 import { GridPattern } from '@/components/design-system/GridPattern';
+import { isBootstrapOwner } from '@/services/userService';
+import { AdminBootstrapAction } from '@/components/admin/AdminBootstrapAction';
 import {
   Shield,
   Users,
@@ -70,9 +72,11 @@ export const AdminShell: React.FC<{ children: React.ReactNode }> = ({ children }
 
   // Security barrier: Non-staff or unauthenticated users cannot access Admin shell
   if (!user || !isStaff) {
+    const isOwner = user ? isBootstrapOwner(user.email) : false;
+
     return (
       <div className="min-h-screen bg-[#F5F7FA] flex items-center justify-center p-4">
-        <div className="max-w-md w-full bg-white border border-[#E2E8F0] p-8 shadow-sm relative text-center">
+        <div className="max-w-lg w-full bg-white border border-[#E2E8F0] p-8 shadow-sm relative text-center">
           <GridPattern />
           <div className="relative z-10">
             <div className="w-12 h-12 bg-red-50 border border-red-200 text-[#D62828] flex items-center justify-center mx-auto mb-4">
@@ -87,6 +91,14 @@ export const AdminShell: React.FC<{ children: React.ReactNode }> = ({ children }
             <p className="text-xs text-gray-600 leading-relaxed mb-6">
               Administrative credentials required. Your authenticated identity does not hold active administrator or manager roles within the VIREXON BIOSCIENCES governance registry.
             </p>
+
+            {/* Initial Super Admin Bootstrap Action */}
+            {isOwner && (
+              <div className="mb-6 text-left">
+                <AdminBootstrapAction />
+              </div>
+            )}
+
             <div className="flex flex-col sm:flex-row gap-2">
               <button
                 onClick={() => navigate('login')}

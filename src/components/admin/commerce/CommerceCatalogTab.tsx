@@ -10,6 +10,7 @@ import {
   getAllInventory,
   updateInventoryAdmin,
 } from '@/services/commerce/inventoryService';
+import { seedProductionCommerceCatalog } from '@/services/commerce/seedCommerceService';
 import {
   Product,
   ProductVariant,
@@ -29,6 +30,7 @@ import {
   Layers,
   X,
   CheckCircle2,
+  Sparkles,
 } from 'lucide-react';
 
 export const CommerceCatalogTab: React.FC = () => {
@@ -36,6 +38,8 @@ export const CommerceCatalogTab: React.FC = () => {
   const [variants, setVariants] = useState<ProductVariant[]>([]);
   const [inventories, setInventories] = useState<InventoryRecord[]>([]);
   const [loading, setLoading] = useState(true);
+  const [seeding, setSeeding] = useState(false);
+  const [seedSuccessMsg, setSeedSuccessMsg] = useState<string | null>(null);
 
   // Modals
   const [showProductModal, setShowProductModal] = useState(false);
@@ -91,6 +95,22 @@ export const CommerceCatalogTab: React.FC = () => {
       console.warn('Error loading commerce catalog:', err);
     } finally {
       setLoading(false);
+    }
+  };
+
+  const handleSeedCanonicalCatalog = async () => {
+    setSeeding(true);
+    setErrorMsg(null);
+    setSeedSuccessMsg(null);
+    try {
+      const result = await seedProductionCommerceCatalog();
+      setSeedSuccessMsg(result.message || 'Canonical commerce catalog seeded successfully.');
+      await loadCommerceData();
+    } catch (err: any) {
+      console.error('Failed to seed commerce catalog:', err);
+      setErrorMsg(err.message || 'Failed to seed canonical commerce catalog.');
+    } finally {
+      setSeeding(false);
     }
   };
 
@@ -198,16 +218,27 @@ export const CommerceCatalogTab: React.FC = () => {
             Authoritative product lines, SKU variants, DZD pricing, and warehouse inventory pools.
           </p>
         </div>
-        <div className="flex gap-2">
+        <div className="flex flex-wrap gap-2">
           <Button
             variant="outline"
             size="sm"
             onClick={loadCommerceData}
-            disabled={loading}
+            disabled={loading || seeding}
             className="flex items-center gap-1.5"
           >
             <RefreshCw className={`w-3.5 h-3.5 ${loading ? 'animate-spin' : ''}`} />
             Refresh
+          </Button>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={handleSeedCanonicalCatalog}
+            disabled={loading || seeding}
+            className="flex items-center gap-1.5 text-emerald-400 border-emerald-800/40 bg-emerald-950/20 hover:bg-emerald-900/40 hover:text-emerald-300"
+            title="Idempotently seed the canonical production catalog (ZIRON 1M & 90-Day Bundle) and server inventory"
+          >
+            <Sparkles className={`w-3.5 h-3.5 ${seeding ? 'animate-spin' : ''}`} />
+            {seeding ? 'Seeding Catalog...' : 'Seed Canonical Catalog'}
           </Button>
           <Button
             size="sm"
@@ -232,6 +263,36 @@ export const CommerceCatalogTab: React.FC = () => {
         </div>
       </div>
 
+      {seedSuccessMsg && (
+        <div className="p-3.5 bg-emerald-950/30 border border-emerald-800/60 rounded-xl flex items-center justify-between text-xs text-emerald-300">
+          <div className="flex items-center gap-2">
+            <CheckCircle2 className="w-4 h-4 text-emerald-400 flex-shrink-0" />
+            <span>{seedSuccessMsg}</span>
+          </div>
+          <button
+            onClick={() => setSeedSuccessMsg(null)}
+            className="text-emerald-400 hover:text-emerald-200"
+          >
+            <X className="w-3.5 h-3.5" />
+          </button>
+        </div>
+      )}
+
+      {errorMsg && (
+        <div className="p-3.5 bg-red-950/30 border border-red-800/60 rounded-xl flex items-center justify-between text-xs text-red-300">
+          <div className="flex items-center gap-2">
+            <AlertTriangle className="w-4 h-4 text-red-400 flex-shrink-0" />
+            <span>{errorMsg}</span>
+          </div>
+          <button
+            onClick={() => setErrorMsg(null)}
+            className="text-red-400 hover:text-red-200"
+          >
+            <X className="w-3.5 h-3.5" />
+          </button>
+        </div>
+      )}
+
       {/* Catalog Listing */}
       {loading ? (
         <div className="py-20 text-center text-zinc-400">
@@ -239,10 +300,23 @@ export const CommerceCatalogTab: React.FC = () => {
           Loading products & inventory...
         </div>
       ) : products.length === 0 ? (
-        <div className="py-16 text-center text-zinc-400 bg-zinc-900/30 rounded-2xl border border-zinc-800">
+        <div className="py-16 text-center text-zinc-400 bg-zinc-900/30 rounded-2xl border border-zinc-800 p-6">
           <Package className="w-10 h-10 mx-auto mb-3 text-zinc-600" />
           <p className="text-base font-medium text-zinc-300">No products configured in catalog yet.</p>
-          <p className="text-xs text-zinc-500 mt-1">Click "New Product" to seed your authoritative catalog.</p>
+          <p className="text-xs text-zinc-500 mt-1 max-w-md mx-auto mb-5">
+            Initialize the authoritative canonical commerce products (ZIRON 1-Month and 90-Day Program) along with server-authoritative inventory records.
+          </p>
+          <div className="flex justify-center gap-3">
+            <Button
+              size="sm"
+              onClick={handleSeedCanonicalCatalog}
+              disabled={seeding}
+              className="inline-flex items-center gap-2 bg-emerald-600 hover:bg-emerald-500 text-white"
+            >
+              <Sparkles className={`w-3.5 h-3.5 ${seeding ? 'animate-spin' : ''}`} />
+              {seeding ? 'Initializing Catalog...' : 'Initialize Canonical Commerce Catalog'}
+            </Button>
+          </div>
         </div>
       ) : (
         <div className="space-y-4">

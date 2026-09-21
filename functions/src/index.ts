@@ -11,7 +11,9 @@ import {
   INITIAL_REWARDS,
 } from './gamification';
 
-admin.initializeApp();
+if (!admin.apps.length) {
+  admin.initializeApp();
+}
 
 /**
  * Authoritative Named Firestore Database
@@ -236,6 +238,16 @@ export const initializeBootstrapGovernance = functions.https.onCall(async (_data
   });
 
   await batch.commit();
+
+  // Authoritatively seed production commerce catalog and initial inventory baseline
+  try {
+    await seedProductionCommerceDataInternal({
+      actorUid: callerUid,
+      actorEmail: callerEmail,
+    });
+  } catch (seedErr) {
+    console.error('Failed to seed commerce catalog during bootstrap:', seedErr);
+  }
 
   return { success: true, message: 'Permanent SUPER_ADMIN established. Bootstrap path closed.' };
 });
@@ -4899,6 +4911,375 @@ const CANONICAL_COMMERCE_CATALOG: Record<string, {
   'ZR-BNDL-90C': { sku: 'ZR-BNDL-90C', name: 'ZIRON 3 Month Program', capsules: 90, priceDzd: 22000, phase: 'BUNDLE' },
   'ZR-3M-90C': { sku: 'ZR-3M-90C', name: 'ZIRON 3 Month Program', capsules: 90, priceDzd: 22000, phase: 'BUNDLE' },
 };
+
+export const DEFAULT_PRODUCTION_SEED_STOCK = 100;
+export const DEFAULT_PRODUCTION_LOW_STOCK_THRESHOLD = 10;
+
+export interface SeedCommerceResultInternal {
+  success: boolean;
+  message: string;
+  seededProducts: string[];
+  seededVariants: string[];
+  createdInventory: string[];
+  preservedInventory: string[];
+}
+
+export async function seedProductionCommerceDataInternal(options?: {
+  actorUid?: string;
+  actorEmail?: string;
+  initialStock?: number;
+  lowStockThreshold?: number;
+}): Promise<SeedCommerceResultInternal> {
+  const actorUid = options?.actorUid || 'SYSTEM_BOOTSTRAP';
+  const actorEmail = options?.actorEmail || 'bootstrap@ziron.internal';
+  const initialStock =
+    typeof options?.initialStock === 'number' && options.initialStock >= 0
+      ? Math.floor(options.initialStock)
+      : DEFAULT_PRODUCTION_SEED_STOCK;
+  const threshold =
+    typeof options?.lowStockThreshold === 'number' && options.lowStockThreshold >= 0
+      ? Math.floor(options.lowStockThreshold)
+      : DEFAULT_PRODUCTION_LOW_STOCK_THRESHOLD;
+
+  const now = new Date().toISOString();
+
+  // Canonical Public Products:
+  // 1. ZIRON 1 Month (ZR-1M-30C) — 8,000 DZD
+  // 2. ZIRON 90-Day Program / 3 Months (ZR-BNDL-90C) — 22,000 DZD
+  // Plus compatibility alias ziron-3m-program
+  const canonicalProducts = [
+    {
+      id: 'ziron-1-month',
+      sku: 'ZR-1M-30C',
+      name: {
+        en: 'ZIRON 1 Month',
+        fr: 'ZIRON 1 Mois',
+        ar: 'ZIRON شهر واحد',
+      },
+      slug: 'ziron-1-month',
+      description: {
+        en: 'Authentic 30-capsule monthly container engineered for structured 30-day biological protocol adherence. Available across all 58 Algerian wilayas with tamper-evident seal and serialized verification code.',
+        fr: 'Flacon mensuel authentique de 30 gélules conçu pour un protocole structuré de 30 jours, avec scellé d’inviolabilité et code de vérification sérialisé.',
+        ar: 'عبوة التركيبة التغذوية للشهر الواحد (30 كبسولة) للالتزام المنضبط ببرنامج الـ 30 يومًا، تشمل ختم أمان وكود تحقق مشفر.',
+      },
+      shortDescription: {
+        en: 'CANONICAL 1-MONTH CONTAINER (30 CAPSULES)',
+        fr: 'FLACON CANONIQUE 1 MOIS (30 GÉLULES)',
+        ar: 'العبوة الشهرية القانونية (30 كبسولة)',
+      },
+      brand: 'ZIRON / VIREXON BIOSCIENCES',
+      category: 'CELLULAR_RECOVERY',
+      status: 'ACTIVE',
+      productType: 'PHYSICAL',
+      images: ['/assets/products/ziron-1-month.png'],
+      availableVariants: ['var-zr-1m-30c'],
+      phaseNumber: 1,
+      capsuleCount: 30,
+    },
+    {
+      id: 'ziron-complete-bundle',
+      sku: 'ZR-BNDL-90C',
+      name: {
+        en: 'ZIRON 90-Day Complete Program Bundle',
+        fr: 'Pack Complet 90 Jours ZIRON',
+        ar: 'حزمة برنامج ZIRON الكاملة لـ 90 يومًا',
+      },
+      slug: 'ziron-complete-bundle',
+      description: {
+        en: 'Complete 3-phase course (Phase 01, Phase 02, and Phase 03) totalizing 90 capsules for complete mitochondrial, neurochemical, and hormonal recalibration. Includes free priority shipping across Algeria.',
+        fr: 'Protocole complet en 3 phases (Phase 01, Phase 02 et Phase 03) totalisant 90 gélules pour une recalibration cellulaire complète. Livraison gratuite incluse.',
+        ar: 'بروتوكول متكامل من 3 مراحل (المرحلة 01، المرحلة 02، والمرحلة 03) بإجمالي 90 كبسولة لرحلة الـ 90 يومًا مع شحن مجاني متضمن لكافة ولايات الجزائر.',
+      },
+      shortDescription: {
+        en: 'COMPLETE 90-DAY PROTOCOL BUNDLE (90 CAPSULES)',
+        fr: 'PACK PROTOCOLE COMPLET 90 JOURS (90 GÉLULES)',
+        ar: 'حزمة البروتوكول المتكامل لـ 90 يومًا (90 كبسولة)',
+      },
+      brand: 'ZIRON / VIREXON BIOSCIENCES',
+      category: 'CELLULAR_RECOVERY',
+      status: 'ACTIVE',
+      productType: 'BUNDLE',
+      images: ['/assets/products/ziron-complete-bundle.png'],
+      availableVariants: ['var-zr-bndl-90c'],
+      phaseNumber: 'BUNDLE',
+      capsuleCount: 90,
+    },
+    {
+      id: 'ziron-3m-program',
+      sku: 'ZR-BNDL-90C',
+      name: {
+        en: 'ZIRON 90-Day Complete Program Bundle',
+        fr: 'Pack Complet 90 Jours ZIRON',
+        ar: 'حزمة برنامج ZIRON الكاملة لـ 90 يومًا',
+      },
+      slug: 'ziron-3m-program',
+      description: {
+        en: 'Complete 3-phase course (Phase 01, Phase 02, and Phase 03) totalizing 90 capsules for complete mitochondrial, neurochemical, and hormonal recalibration.',
+        fr: 'Protocole complet en 3 phases (Phase 01, Phase 02 et Phase 03) totalisant 90 gélules.',
+        ar: 'بروتوكول متكامل من 3 مراحل بإجمالي 90 كبسولة.',
+      },
+      shortDescription: {
+        en: 'COMPLETE 90-DAY PROTOCOL BUNDLE',
+        fr: 'PACK PROTOCOLE COMPLET 90 JOURS',
+        ar: 'حزمة البروتوكول المتكامل لـ 90 يومًا',
+      },
+      brand: 'ZIRON / VIREXON BIOSCIENCES',
+      category: 'CELLULAR_RECOVERY',
+      status: 'ACTIVE',
+      productType: 'BUNDLE',
+      images: ['/assets/products/ziron-complete-bundle.png'],
+      availableVariants: ['var-zr-bndl-90c'],
+      phaseNumber: 'BUNDLE',
+      capsuleCount: 90,
+    },
+  ];
+
+  // Canonical Public Variants
+  const canonicalVariants = [
+    {
+      id: 'var-zr-1m-30c',
+      productId: 'ziron-1-month',
+      sku: 'ZR-1M-30C',
+      name: {
+        en: 'ZIRON 1 Month (30 Capsules)',
+        fr: 'ZIRON 1 Mois (30 Gélules)',
+        ar: 'ZIRON شهر واحد (30 كبسولة)',
+      },
+      quantity: 30,
+      unit: 'capsules',
+      price: 8000,
+      currency: 'DZD',
+      status: 'ACTIVE',
+      inventoryId: 'inv-zr-1m-30c',
+    },
+    {
+      id: 'var-zr-bndl-90c',
+      productId: 'ziron-complete-bundle',
+      sku: 'ZR-BNDL-90C',
+      name: {
+        en: 'ZIRON 90-Day Complete Program Bundle (90 Capsules)',
+        fr: 'Pack Complet 90 Jours ZIRON (90 Gélules)',
+        ar: 'حزمة برنامج ZIRON الكاملة لـ 90 يومًا (90 كبسولة)',
+      },
+      quantity: 90,
+      unit: 'capsules',
+      price: 22000,
+      currency: 'DZD',
+      status: 'ACTIVE',
+      inventoryId: 'inv-zr-bndl-90c',
+    },
+    {
+      id: 'var-zr-3m-90c',
+      productId: 'ziron-complete-bundle',
+      sku: 'ZR-3M-90C',
+      name: {
+        en: 'ZIRON 90-Day Program (90 Capsules)',
+        fr: 'ZIRON Programme 90 Jours (90 Gélules)',
+        ar: 'برنامج ZIRON لـ 90 يومًا (90 كبسولة)',
+      },
+      quantity: 90,
+      unit: 'capsules',
+      price: 22000,
+      currency: 'DZD',
+      status: 'ACTIVE',
+      inventoryId: 'inv-zr-bndl-90c',
+    },
+  ];
+
+  // Canonical Inventory Records
+  const canonicalInventory = [
+    {
+      id: 'inv-zr-1m-30c',
+      variantId: 'var-zr-1m-30c',
+      productId: 'ziron-1-month',
+      sku: 'ZR-1M-30C',
+    },
+    {
+      id: 'inv-zr-bndl-90c',
+      variantId: 'var-zr-bndl-90c',
+      productId: 'ziron-complete-bundle',
+      sku: 'ZR-BNDL-90C',
+    },
+  ];
+
+  const seededProducts: string[] = [];
+  const seededVariants: string[] = [];
+  const createdInventory: string[] = [];
+  const preservedInventory: string[] = [];
+
+  const batch = db.batch();
+
+  // 1. Seed Products Idempotently
+  for (const prod of canonicalProducts) {
+    const pRef = db.collection('products').doc(prod.id);
+    const snap = await pRef.get();
+    if (!snap.exists) {
+      batch.set(pRef, {
+        ...prod,
+        createdAt: now,
+        updatedAt: now,
+      });
+      seededProducts.push(prod.id);
+    } else {
+      const existing = snap.data() || {};
+      batch.set(
+        pRef,
+        {
+          ...prod,
+          createdAt: existing.createdAt || now,
+          updatedAt: now,
+        },
+        { merge: true }
+      );
+      seededProducts.push(prod.id);
+    }
+  }
+
+  // 2. Seed Variants Idempotently
+  for (const v of canonicalVariants) {
+    const vRef = db.collection('productVariants').doc(v.id);
+    const snap = await vRef.get();
+    if (!snap.exists) {
+      batch.set(vRef, {
+        ...v,
+        createdAt: now,
+        updatedAt: now,
+      });
+      seededVariants.push(v.id);
+    } else {
+      const existing = snap.data() || {};
+      batch.set(
+        vRef,
+        {
+          ...v,
+          createdAt: existing.createdAt || now,
+          updatedAt: now,
+        },
+        { merge: true }
+      );
+      seededVariants.push(v.id);
+    }
+  }
+
+  // 3. Seed Inventory Idempotently (DO NOT OVERWRITE OPERATIONAL QUANTITIES)
+  for (const inv of canonicalInventory) {
+    const invRef = db.collection('inventory').doc(inv.id);
+    const snap = await invRef.get();
+
+    if (!snap.exists) {
+      const initialRecord = {
+        id: inv.id,
+        variantId: inv.variantId,
+        productId: inv.productId,
+        sku: inv.sku,
+        totalQuantity: initialStock,
+        availableQuantity: initialStock,
+        reservedQuantity: 0,
+        soldQuantity: 0,
+        lowStockThreshold: threshold,
+        status: initialStock > 0 ? 'IN_STOCK' : 'OUT_OF_STOCK',
+        createdAt: now,
+        updatedAt: now,
+      };
+      batch.set(invRef, initialRecord);
+      createdInventory.push(inv.id);
+    } else {
+      const existing = snap.data() || {};
+      if (typeof existing.availableQuantity === 'number') {
+        preservedInventory.push(inv.id);
+        batch.set(
+          invRef,
+          {
+            id: inv.id,
+            variantId: inv.variantId,
+            productId: inv.productId,
+            sku: inv.sku,
+            lowStockThreshold: existing.lowStockThreshold ?? threshold,
+            updatedAt: now,
+          },
+          { merge: true }
+        );
+      } else {
+        batch.set(
+          invRef,
+          {
+            id: inv.id,
+            variantId: inv.variantId,
+            productId: inv.productId,
+            sku: inv.sku,
+            totalQuantity: initialStock,
+            availableQuantity: initialStock,
+            reservedQuantity: 0,
+            soldQuantity: 0,
+            lowStockThreshold: threshold,
+            status: initialStock > 0 ? 'IN_STOCK' : 'OUT_OF_STOCK',
+            updatedAt: now,
+          },
+          { merge: true }
+        );
+        createdInventory.push(inv.id);
+      }
+    }
+  }
+
+  // 4. Record Audit Log
+  const auditRef = db.collection('auditLogs').doc();
+  batch.set(auditRef, {
+    id: auditRef.id,
+    actorUserId: actorUid,
+    actorEmail: actorEmail,
+    action: 'COMMERCE_CATALOG_SEEDED',
+    resourceType: '_system',
+    resourceId: 'commerce_catalog',
+    timestamp: now,
+    metadata: {
+      seededProducts,
+      seededVariants,
+      createdInventory,
+      preservedInventory,
+      initialStockConfigured: initialStock,
+      lowStockThresholdConfigured: threshold,
+      enforcedBy: 'SERVER_AUTHORITY',
+    },
+  });
+
+  await batch.commit();
+
+  return {
+    success: true,
+    message: `Commerce catalog seeded successfully (${seededProducts.length} products, ${seededVariants.length} variants, ${createdInventory.length} inventory records created, ${preservedInventory.length} preserved).`,
+    seededProducts,
+    seededVariants,
+    createdInventory,
+    preservedInventory,
+  };
+}
+
+/**
+ * Callable Function: Authoritative Production Commerce Seed (Admin / Staff)
+ */
+export const seedProductionCommerceCatalog = functions.https.onCall(async (data, context) => {
+  const { callerUid, callerEmail } = await assertCanManageCommerce(context);
+
+  const initialStock =
+    typeof data?.initialStock === 'number' && data.initialStock >= 0
+      ? Math.floor(data.initialStock)
+      : DEFAULT_PRODUCTION_SEED_STOCK;
+  const threshold =
+    typeof data?.lowStockThreshold === 'number' && data.lowStockThreshold >= 0
+      ? Math.floor(data.lowStockThreshold)
+      : DEFAULT_PRODUCTION_LOW_STOCK_THRESHOLD;
+
+  const result = await seedProductionCommerceDataInternal({
+    actorUid: callerUid,
+    actorEmail: callerEmail,
+    initialStock,
+    lowStockThreshold: threshold,
+  });
+
+  return result;
+});
+
 
 /**
  * Callable Function: Create Product (Admin / Staff)

@@ -216,3 +216,4 @@ export const createProductAdmin = createCommerceProduct;
 export const updateProductAdmin = updateCommerceProduct;
 export const createVariantAdmin = createCommerceVariant;
 export const updateVariantAdmin = updateCommerceVariant;
+export { seedProductionCommerceCatalog } from './seedCommerceService';
