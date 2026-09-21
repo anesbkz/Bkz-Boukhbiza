@@ -1,7 +1,11 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useI18n } from '@/context/I18nContext';
+import { useAuth } from '@/context/AuthContext';
 import { getLocalizedCatalog, formatDzdPrice, CatalogItem } from '@/lib/content/catalog';
 import { getPublicTranslations } from '@/lib/i18n/publicTranslations';
+import { createOrder } from '@/services/commerce/orderService';
+import { CreateOrderRequest } from '@/types/commerce';
+import { PublicRoute } from '@/types';
 import { Button } from '@/components/design-system/Button';
 import { Card } from '@/components/design-system/Card';
 import { Badge } from '@/components/design-system/Badge';
@@ -17,10 +21,15 @@ import {
   X,
   CreditCard,
   QrCode,
+  Loader2,
+  AlertCircle,
+  LogIn,
+  UserPlus,
 } from 'lucide-react';
 
 export const ShopPage: React.FC = () => {
-  const { locale } = useI18n();
+  const { locale, navigate } = useI18n();
+  const { user, profile } = useAuth();
   const t = getPublicTranslations(locale);
   const s = t.shop;
 
@@ -31,23 +40,16 @@ export const ShopPage: React.FC = () => {
 
   const [selectedProduct, setSelectedProduct] = useState<CatalogItem | null>(null);
   const [orderModalOpen, setOrderModalOpen] = useState<boolean>(false);
-  const [orderSubmitted, setOrderSubmitted] = useState<boolean>(false);
+  const [isSubmitting, setIsSubmitting] = useState<boolean>(false);
+  const [orderError, setOrderError] = useState<string | null>(null);
 
   // Form State
   const [fullName, setFullName] = useState<string>('');
   const [phone, setPhone] = useState<string>('');
   const [wilaya, setWilaya] = useState<string>('16 - Alger');
-
-  const handleOpenOrder = (product: CatalogItem) => {
-    setSelectedProduct(product);
-    setOrderSubmitted(false);
-    setOrderModalOpen(true);
-  };
-
-  const handleConfirmOrder = (e: React.FormEvent) => {
-    e.preventDefault();
-    setOrderSubmitted(true);
-  };
+  const [city, setCity] = useState<string>('');
+  const [address, setAddress] = useState<string>('');
+  const [notes, setNotes] = useState<string>('');
 
   const wilayasList = [
     '01 - Adrar', '02 - Chlef', '03 - Laghouat', '04 - Oum El Bouaghi', '05 - Batna',
@@ -63,6 +65,149 @@ export const ShopPage: React.FC = () => {
     '51 - Ouled Djellal', '52 - Béni Abbès', '53 - In Salah', '54 - In Guezzam', '55 - Touggourt',
     '56 - Djanet', '57 - El M\'Ghair', '58 - El Meniaa',
   ];
+
+  // Prefill shipping information from profile when available
+  useEffect(() => {
+    if (profile) {
+      if (!fullName) {
+        const name = profile.displayName || [profile.firstName, profile.lastName].filter(Boolean).join(' ');
+        if (name) setFullName(name);
+      }
+      if (!phone && (profile.phone || profile.phoneNumber)) {
+        setPhone(profile.phone || profile.phoneNumber || '');
+      }
+      if (profile.wilaya && wilaya === '16 - Alger') {
+        const matched = wilayasList.find((w) =>
+          w.toLowerCase().includes(profile.wilaya!.toLowerCase())
+        );
+        if (matched) setWilaya(matched);
+      }
+      if (!city && profile.city) {
+        setCity(profile.city);
+      }
+      if (!address && profile.address) {
+        setAddress(profile.address);
+      }
+    }
+  }, [profile]);
+
+  const handleOpenOrder = (product: CatalogItem) => {
+    setSelectedProduct(product);
+    setOrderError(null);
+    setOrderModalOpen(true);
+  };
+
+  const handleConfirmOrder = async (e: React.FormEvent) => {
+    e.preventDefault();
+
+    // 1. Require authenticated user before order submission
+    if (!user) {
+      setOrderError(
+        locale === 'ar'
+          ? 'يرجى تسجيل الدخول أو إنشاء حساب لإتمام الطلب'
+          : locale === 'fr'
+          ? 'Veuillez vous connecter ou créer un compte pour commander'
+          : 'Please sign in or create an account to place an order'
+      );
+      // 2. Direct unauthenticated user to login/registration flow
+      navigate('login');
+      return;
+    }
+
+    if (!selectedProduct) {
+      setOrderError(
+        locale === 'ar' ? 'لم يتم تحديد أي منتج' : locale === 'fr' ? 'Aucun produit sélectionné' : 'No product selected'
+      );
+      return;
+    }
+
+    const trimmedName = fullName.trim();
+    if (!trimmedName || trimmedName.length < 2) {
+      setOrderError(
+        locale === 'ar'
+          ? 'يرجى إدخال اسم المستلم الكامل (حرفان على الأقل)'
+          : locale === 'fr'
+          ? 'Veuillez saisir un nom complet valide (au moins 2 caractères)'
+          : 'Please enter a valid recipient name (minimum 2 characters)'
+      );
+      return;
+    }
+
+    const trimmedPhone = phone.trim();
+    if (!trimmedPhone || trimmedPhone.length < 8) {
+      setOrderError(
+        locale === 'ar'
+          ? 'يرجى إدخال رقم هاتف صحيح (8 أرقام على الأقل)'
+          : locale === 'fr'
+          ? 'Veuillez saisir un numéro de téléphone valide (au moins 8 caractères)'
+          : 'Please enter a valid phone number (minimum 8 characters)'
+      );
+      return;
+    }
+
+    const trimmedAddress = address.trim();
+    if (!trimmedAddress) {
+      setOrderError(
+        locale === 'ar'
+          ? 'يرجى إدخال عنوان التوصيل بالتفصيل'
+          : locale === 'fr'
+          ? 'Veuillez saisir une adresse de livraison détaillée'
+          : 'Please enter a detailed delivery address'
+      );
+      return;
+    }
+
+    setIsSubmitting(true);
+    setOrderError(null);
+
+    try {
+      // 4. Pass selected SKU/variant (standard var- prefix matching backend catalog and productVariants)
+      const variantId = 'var-' + selectedProduct.sku.toLowerCase().replace(/[^a-z0-9]/g, '-');
+      const resolvedCity = city.trim() || wilaya.split('-')[1]?.trim() || wilaya.trim();
+      const idempotencyKey = `order_${user.uid}_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
+
+      // 3. Connect to authoritative backend createOrder
+      const orderPayload: CreateOrderRequest = {
+        items: [
+          {
+            variantId,
+            quantity: 1,
+          },
+        ],
+        shippingAddress: {
+          recipientName: trimmedName,
+          phone: trimmedPhone,
+          wilaya: wilaya.trim(),
+          city: resolvedCity,
+          address: trimmedAddress,
+          notes: notes.trim() || undefined,
+        },
+        idempotencyKey,
+      };
+
+      const result = await createOrder(orderPayload);
+
+      // 5. On successful order creation, navigate to /app/orders/:orderId
+      if (result.success && result.order?.id) {
+        setOrderModalOpen(false);
+        navigate(`app/orders/${result.order.id}` as PublicRoute);
+      } else {
+        throw new Error(result.message || 'Order creation failed.');
+      }
+    } catch (err: any) {
+      console.error('Failed to create customer order:', err);
+      const msg =
+        err?.message ||
+        (locale === 'ar'
+          ? 'تعذر إتمام الطلب، يرجى التحقق من صحة البيانات والمحاولة مرة أخرى.'
+          : locale === 'fr'
+          ? 'Échec de la création de la commande. Veuillez vérifier vos informations et réessayer.'
+          : 'Could not create order. Please verify your details and try again.');
+      setOrderError(msg);
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
 
   return (
     <div className="py-12 bg-[#F5F7FA]">
@@ -410,77 +555,127 @@ export const ShopPage: React.FC = () => {
             <div className="bg-white max-w-lg w-full p-6 sm:p-8 border border-[#E2E8F0] shadow-2xl relative max-h-[90vh] overflow-y-auto">
               <button
                 type="button"
+                disabled={isSubmitting}
                 onClick={() => setOrderModalOpen(false)}
-                className="absolute right-4 top-4 rtl:left-4 rtl:right-auto text-gray-400 hover:text-gray-600 cursor-pointer"
+                className="absolute right-4 top-4 rtl:left-4 rtl:right-auto text-gray-400 hover:text-gray-600 disabled:opacity-50 cursor-pointer"
               >
                 <X className="w-5 h-5" />
               </button>
 
-              {!orderSubmitted ? (
-                <form onSubmit={handleConfirmOrder} className="space-y-5">
-                  <div className="border-b border-gray-100 pb-3">
-                    <span className="text-[10px] font-mono uppercase text-gray-400">
-                      {s.modalTitle}
-                    </span>
-                    <h3 className="text-lg font-bold text-[#0B2346]">
-                      {selectedProduct.name}
-                    </h3>
-                    {selectedProduct.phase === 'BUNDLE' ? (
-                      <div className="text-xs font-mono font-bold text-emerald-700 mt-0.5">
+              <form onSubmit={handleConfirmOrder} className="space-y-5">
+                <div className="border-b border-gray-100 pb-3">
+                  <span className="text-[10px] font-mono uppercase text-gray-400">
+                    {s.modalTitle}
+                  </span>
+                  <h3 className="text-lg font-bold text-[#0B2346]">
+                    {selectedProduct.name}
+                  </h3>
+                  {selectedProduct.phase === 'BUNDLE' ? (
+                    <div className="text-xs font-mono font-bold text-emerald-700 mt-0.5">
+                      {locale === 'ar'
+                        ? `السعر: ${formatDzdPrice(selectedProduct.priceDzd, locale)} • الشحن مجاني متضمن (${s.codTag})`
+                        : locale === 'fr'
+                        ? `Prix : ${formatDzdPrice(selectedProduct.priceDzd, locale)} • Livraison gratuite incluse (${s.codTag})`
+                        : `Price: ${formatDzdPrice(selectedProduct.priceDzd, locale)} • Free Shipping Included (${s.codTag})`}
+                    </div>
+                  ) : (
+                    <div className="text-xs font-mono font-bold text-[#0B2346] mt-0.5">
+                      {locale === 'ar'
+                        ? `السعر: ${formatDzdPrice(selectedProduct.priceDzd, locale)} • تكلفة الشحن يتم الاتفاق عليها حسب الولاية (${s.codTag})`
+                        : locale === 'fr'
+                        ? `Prix : ${formatDzdPrice(selectedProduct.priceDzd, locale)} • Frais de livraison convenus selon la wilaya (${s.codTag})`
+                        : `Price: ${formatDzdPrice(selectedProduct.priceDzd, locale)} • Shipping fee agreed based on wilaya (${s.codTag})`}
+                    </div>
+                  )}
+                </div>
+
+                {/* 1 & 2. Authentication Requirement Banner for Unauthenticated Visitors */}
+                {!user && (
+                  <div className="p-4 bg-amber-50 border border-amber-200 text-amber-900 space-y-3">
+                    <div className="flex items-center gap-2 font-bold text-xs">
+                      <AlertCircle className="w-4 h-4 text-amber-700 shrink-0" />
+                      <span>
                         {locale === 'ar'
-                          ? `السعر: ${formatDzdPrice(selectedProduct.priceDzd, locale)} • الشحن مجاني متضمن (${s.codTag})`
+                          ? 'تسجيل الدخول مطلوب لإتمام الطلب'
                           : locale === 'fr'
-                          ? `Prix : ${formatDzdPrice(selectedProduct.priceDzd, locale)} • Livraison gratuite incluse (${s.codTag})`
-                          : `Price: ${formatDzdPrice(selectedProduct.priceDzd, locale)} • Free Shipping Included (${s.codTag})`}
-                      </div>
-                    ) : (
-                      <div className="text-xs font-mono font-bold text-[#0B2346] mt-0.5">
-                        {locale === 'ar'
-                          ? `السعر: ${formatDzdPrice(selectedProduct.priceDzd, locale)} • تكلفة الشحن يتم الاتفاق عليها حسب الولاية (${s.codTag})`
-                          : locale === 'fr'
-                          ? `Prix : ${formatDzdPrice(selectedProduct.priceDzd, locale)} • Frais de livraison convenus selon la wilaya (${s.codTag})`
-                          : `Price: ${formatDzdPrice(selectedProduct.priceDzd, locale)} • Shipping fee agreed based on wilaya (${s.codTag})`}
-                      </div>
-                    )}
+                          ? 'Connexion requise pour commander'
+                          : 'Account Required to Place Order'}
+                      </span>
+                    </div>
+                    <p className="text-[11px] text-amber-800 leading-relaxed">
+                      {locale === 'ar'
+                        ? 'يرجى تسجيل الدخول أو إنشاء حساب جديد لربط شحنتك بحسابك ومتابعة التوصيل وتفعيل كود المنتج في المنصة.'
+                        : locale === 'fr'
+                        ? 'Veuillez vous connecter ou créer un compte pour lier votre commande, suivre la livraison et activer votre code produit.'
+                        : 'Please sign in or create an account to link your order, track delivery in real time, and activate your product code.'}
+                    </p>
+                    <div className="flex flex-wrap gap-2 pt-1">
+                      <Button
+                        type="button"
+                        variant="primary"
+                        size="sm"
+                        onClick={() => navigate('login')}
+                        className="cursor-pointer inline-flex items-center gap-1.5"
+                      >
+                        <LogIn className="w-3.5 h-3.5" />
+                        <span>{locale === 'ar' ? 'تسجيل الدخول' : locale === 'fr' ? 'Se connecter' : 'Sign In'}</span>
+                      </Button>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        onClick={() => navigate('register')}
+                        className="cursor-pointer inline-flex items-center gap-1.5"
+                      >
+                        <UserPlus className="w-3.5 h-3.5" />
+                        <span>{locale === 'ar' ? 'إنشاء حساب جديد' : locale === 'fr' ? 'Créer un compte' : 'Create Account'}</span>
+                      </Button>
+                    </div>
+                  </div>
+                )}
+
+                {/* Shipping Form Fields */}
+                <div className="space-y-3 text-xs">
+                  <div>
+                    <label className="block text-gray-700 font-semibold mb-1">
+                      {s.fullNameLabel} <span className="text-red-500">*</span>
+                    </label>
+                    <input
+                      type="text"
+                      required
+                      disabled={isSubmitting}
+                      value={fullName}
+                      onChange={(e) => setFullName(e.target.value)}
+                      placeholder={locale === 'ar' ? 'مثال: كريم المنصوري' : 'e.g. Karim Mansouri'}
+                      className="w-full bg-[#F5F7FA] border border-[#E2E8F0] px-3 py-2 text-xs text-[#0B2346] focus:outline-none focus:ring-1 focus:ring-[#0B2346] disabled:opacity-50"
+                    />
                   </div>
 
-                  <div className="space-y-3 text-xs">
-                    <div>
-                      <label className="block text-gray-700 font-semibold mb-1">
-                        {s.fullNameLabel}
-                      </label>
-                      <input
-                        type="text"
-                        required
-                        value={fullName}
-                        onChange={(e) => setFullName(e.target.value)}
-                        placeholder={locale === 'ar' ? 'مثال: كريم المنصوري' : 'e.g. Karim Mansouri'}
-                        className="w-full bg-[#F5F7FA] border border-[#E2E8F0] px-3 py-2 text-xs text-[#0B2346] focus:outline-none focus:ring-1 focus:ring-[#0B2346]"
-                      />
-                    </div>
+                  <div>
+                    <label className="block text-gray-700 font-semibold mb-1">
+                      {s.phoneLabel} <span className="text-red-500">*</span>
+                    </label>
+                    <input
+                      type="tel"
+                      required
+                      disabled={isSubmitting}
+                      value={phone}
+                      onChange={(e) => setPhone(e.target.value)}
+                      placeholder="0550 12 34 56"
+                      className="w-full bg-[#F5F7FA] border border-[#E2E8F0] px-3 py-2 text-xs text-[#0B2346] focus:outline-none focus:ring-1 focus:ring-[#0B2346] disabled:opacity-50"
+                    />
+                  </div>
 
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                     <div>
                       <label className="block text-gray-700 font-semibold mb-1">
-                        {s.phoneLabel}
-                      </label>
-                      <input
-                        type="tel"
-                        required
-                        value={phone}
-                        onChange={(e) => setPhone(e.target.value)}
-                        placeholder="0550 12 34 56"
-                        className="w-full bg-[#F5F7FA] border border-[#E2E8F0] px-3 py-2 text-xs text-[#0B2346] focus:outline-none focus:ring-1 focus:ring-[#0B2346]"
-                      />
-                    </div>
-
-                    <div>
-                      <label className="block text-gray-700 font-semibold mb-1">
-                        {s.wilayaLabel}
+                        {s.wilayaLabel} <span className="text-red-500">*</span>
                       </label>
                       <select
                         value={wilaya}
+                        disabled={isSubmitting}
                         onChange={(e) => setWilaya(e.target.value)}
-                        className="w-full bg-[#F5F7FA] border border-[#E2E8F0] px-3 py-2 text-xs text-[#0B2346] focus:outline-none focus:ring-1 focus:ring-[#0B2346]"
+                        className="w-full bg-[#F5F7FA] border border-[#E2E8F0] px-3 py-2 text-xs text-[#0B2346] focus:outline-none focus:ring-1 focus:ring-[#0B2346] disabled:opacity-50"
                       >
                         {wilayasList.map((w) => (
                           <option key={w} value={w}>
@@ -489,68 +684,124 @@ export const ShopPage: React.FC = () => {
                         ))}
                       </select>
                     </div>
+
+                    <div>
+                      <label className="block text-gray-700 font-semibold mb-1">
+                        {locale === 'ar' ? 'المدينة / البلدية' : locale === 'fr' ? 'Commune / Ville' : 'City / Municipality'}
+                      </label>
+                      <input
+                        type="text"
+                        disabled={isSubmitting}
+                        value={city}
+                        onChange={(e) => setCity(e.target.value)}
+                        placeholder={locale === 'ar' ? 'مثال: باب الزوار' : 'e.g. Bab Ezzouar'}
+                        className="w-full bg-[#F5F7FA] border border-[#E2E8F0] px-3 py-2 text-xs text-[#0B2346] focus:outline-none focus:ring-1 focus:ring-[#0B2346] disabled:opacity-50"
+                      />
+                    </div>
                   </div>
 
-                  <div className="p-3 bg-blue-50 border border-blue-200 text-[11px] text-blue-900 leading-relaxed">
-                    <strong>{locale === 'ar' ? 'طريقة الاستلام والدفع:' : locale === 'fr' ? 'Modalités de livraison :' : 'Payment Terms:'}</strong>{' '}
-                    {selectedProduct.phase === 'BUNDLE'
-                      ? locale === 'ar'
-                        ? 'الشحن مجاني بالكامل لحزمة الـ 90 يومًا. يتم دفع 22,000 د.ج نقدًا لمندوب التوصيل عند استلام الطرد بعد التأكد من سلامة الأختام. سيتصل بك فريقنا لتأكيد موعد التسليم.'
-                        : locale === 'fr'
-                        ? 'La livraison est 100% offerte pour le Pack 90 Jours. Vous réglez 22 000 DZD en espèces à la réception après contrôle des scellés. Notre équipe vous contactera pour coordonner le créneau.'
-                        : 'Delivery is 100% free for the 90-Day Pack. You pay 22,000 DZD in cash upon delivery after inspecting intact tamper-evident seals. Our dispatch team will call to schedule delivery.'
-                      : locale === 'ar'
-                        ? 'يتم دفع 8,000 د.ج للمنتج بالإضافة إلى تكلفة الشحن المتفق عليها نقدًا عند الاستلام. سيتصل بك فريق التوصيل لتأكيد العنوان وتكلفة التوصيل المناسبة لولايتك.'
-                        : locale === 'fr'
-                        ? 'Le paiement de 8 000 DZD plus les frais de livraison convenus s’effectue en espèces à la livraison. Notre équipe vous appellera pour convenir du tarif selon votre wilaya.'
-                        : 'Payment of 8,000 DZD plus the agreed delivery fee is collected in cash upon arrival. Our team will call to confirm the delivery terms for your specific wilaya.'}
+                  <div>
+                    <label className="block text-gray-700 font-semibold mb-1">
+                      {locale === 'ar' ? 'عنوان التوصيل بالتفصيل' : locale === 'fr' ? 'Adresse de livraison' : 'Delivery Address'} <span className="text-red-500">*</span>
+                    </label>
+                    <input
+                      type="text"
+                      required
+                      disabled={isSubmitting}
+                      value={address}
+                      onChange={(e) => setAddress(e.target.value)}
+                      placeholder={locale === 'ar' ? 'الحي، الشارع، رقم العمارة أو المنزل' : 'Street, building, apartment / home'}
+                      className="w-full bg-[#F5F7FA] border border-[#E2E8F0] px-3 py-2 text-xs text-[#0B2346] focus:outline-none focus:ring-1 focus:ring-[#0B2346] disabled:opacity-50"
+                    />
                   </div>
 
-                  <div className="pt-2 flex gap-3">
+                  <div>
+                    <label className="block text-gray-700 font-semibold mb-1">
+                      {locale === 'ar' ? 'ملاحظات التوصيل (اختياري)' : locale === 'fr' ? 'Instructions de livraison (Optionnel)' : 'Delivery Notes (Optional)'}
+                    </label>
+                    <input
+                      type="text"
+                      disabled={isSubmitting}
+                      value={notes}
+                      onChange={(e) => setNotes(e.target.value)}
+                      placeholder={locale === 'ar' ? 'الاتصال قبل التوصيل، موعد مفضل...' : 'Call before arrival, preferred delivery time...'}
+                      className="w-full bg-[#F5F7FA] border border-[#E2E8F0] px-3 py-2 text-xs text-[#0B2346] focus:outline-none focus:ring-1 focus:ring-[#0B2346] disabled:opacity-50"
+                    />
+                  </div>
+                </div>
+
+                <div className="p-3 bg-blue-50 border border-blue-200 text-[11px] text-blue-900 leading-relaxed">
+                  <strong>{locale === 'ar' ? 'طريقة الاستلام والدفع:' : locale === 'fr' ? 'Modalités de livraison :' : 'Payment Terms:'}</strong>{' '}
+                  {selectedProduct.phase === 'BUNDLE'
+                    ? locale === 'ar'
+                      ? 'الشحن مجاني بالكامل لحزمة الـ 90 يومًا. يتم دفع 22,000 د.ج نقدًا لمندوب التوصيل عند استلام الطرد بعد التأكد من سلامة الأختام. سيتصل بك فريقنا لتأكيد موعد التسليم.'
+                      : locale === 'fr'
+                      ? 'La livraison est 100% offerte pour le Pack 90 Jours. Vous réglez 22 000 DZD en espèces à la réception après contrôle des scellés. Notre équipe vous contactera pour coordonner le créneau.'
+                      : 'Delivery is 100% free for the 90-Day Pack. You pay 22,000 DZD in cash upon delivery after inspecting intact tamper-evident seals. Our dispatch team will call to schedule delivery.'
+                    : locale === 'ar'
+                      ? 'يتم دفع 8,000 د.ج للمنتج بالإضافة إلى تكلفة الشحن المتفق عليها نقدًا عند الاستلام. سيتصل بك فريق التوصيل لتأكيد العنوان وتكلفة التوصيل المناسبة لولايتك.'
+                      : locale === 'fr'
+                      ? 'Le paiement de 8 000 DZD plus les frais de livraison convenus s’effectue en espèces à la livraison. Notre équipe vous appellera pour convenir du tarif selon votre wilaya.'
+                      : 'Payment of 8,000 DZD plus the agreed delivery fee is collected in cash upon arrival. Our team will call to confirm the delivery terms for your specific wilaya.'}
+                </div>
+
+                {/* 6. Display Error State */}
+                {orderError && (
+                  <div className="p-3 bg-red-50 border border-red-200 text-xs text-red-700 flex items-start gap-2">
+                    <AlertCircle className="w-4 h-4 shrink-0 mt-0.5" />
+                    <span>{orderError}</span>
+                  </div>
+                )}
+
+                <div className="pt-2 flex gap-3">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="md"
+                    disabled={isSubmitting}
+                    onClick={() => setOrderModalOpen(false)}
+                    className="w-1/2 cursor-pointer disabled:opacity-50"
+                  >
+                    {s.cancelBtn}
+                  </Button>
+
+                  {!user ? (
                     <Button
                       type="button"
-                      variant="outline"
+                      variant="primary"
                       size="md"
-                      onClick={() => setOrderModalOpen(false)}
-                      className="w-1/2 cursor-pointer"
+                      onClick={() => navigate('login')}
+                      className="w-1/2 cursor-pointer flex items-center justify-center gap-1.5"
                     >
-                      {s.cancelBtn}
+                      <LogIn className="w-4 h-4" />
+                      <span>{locale === 'ar' ? 'تسجيل الدخول للطلب' : locale === 'fr' ? 'Se connecter' : 'Sign In to Order'}</span>
                     </Button>
+                  ) : (
                     <Button
                       type="submit"
                       variant="primary"
                       size="md"
-                      className="w-1/2 cursor-pointer"
+                      disabled={isSubmitting}
+                      className="w-1/2 cursor-pointer flex items-center justify-center gap-2 disabled:opacity-75"
                     >
-                      {s.confirmOrderBtn}
+                      {isSubmitting ? (
+                        <>
+                          <Loader2 className="w-4 h-4 animate-spin" />
+                          <span>
+                            {locale === 'ar'
+                              ? 'جاري تأكيد الطلب...'
+                              : locale === 'fr'
+                              ? 'Envoi en cours...'
+                              : 'Submitting...'}
+                          </span>
+                        </>
+                      ) : (
+                        <span>{s.confirmOrderBtn}</span>
+                      )}
                     </Button>
-                  </div>
-                </form>
-              ) : (
-                <div className="text-center py-6 space-y-4">
-                  <div className="w-12 h-12 bg-emerald-100 text-emerald-700 rounded-full flex items-center justify-center mx-auto">
-                    <Check className="w-6 h-6" />
-                  </div>
-                  <h3 className="text-lg font-bold text-[#0B2346]">
-                    {s.orderSuccessTitle}
-                  </h3>
-                  <p className="text-xs text-gray-600 leading-relaxed max-w-sm mx-auto">
-                    {locale === 'ar'
-                      ? `شكرًا لك، ${fullName || 'عزيزي العميل'}. تم تسجيل طلبك لـ ${selectedProduct.name} بسعر (${formatDzdPrice(selectedProduct.priceDzd, locale)}) إلى ولاية ${wilaya}. سيتصل بك فريقنا على الرقم ${phone || 'رقم هاتفك'} لتنسيق موعد التسليم.`
-                      : locale === 'fr'
-                      ? `Merci, ${fullName || 'cher client'}. Votre commande pour ${selectedProduct.name} (${formatDzdPrice(selectedProduct.priceDzd, locale)}) à destination de ${wilaya} est enregistrée. Notre équipe vous appellera au ${phone || 'votre numéro'} pour organiser la remise du colis.`
-                      : `Thank you, ${fullName || 'Customer'}. Your order for ${selectedProduct.name} (${formatDzdPrice(selectedProduct.priceDzd, locale)}) for delivery to ${wilaya} has been logged. Our dispatch team will contact you at ${phone || 'your phone number'} to coordinate delivery.`}
-                  </p>
-                  <Button
-                    variant="primary"
-                    size="sm"
-                    onClick={() => setOrderModalOpen(false)}
-                    className="cursor-pointer"
-                  >
-                    {s.closeBtn}
-                  </Button>
+                  )}
                 </div>
-              )}
+              </form>
             </div>
           </div>
         )}
