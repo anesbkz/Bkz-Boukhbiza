@@ -1,0 +1,20 @@
+# ZIRON | VIREXON BIOSCIENCES Production Robots Configuration
+User-agent: *
+Allow: /
+Allow: /assets/
+Allow: /public/
+Allow: /favicon.svg
+
+# Disallow Private Application Areas & Dashboards
+Disallow: /app/
+Disallow: /app
+Disallow: /admin/
+Disallow: /admin
+
+# Disallow Non-Content Authenticated Entry Points
+Disallow: /login
+Disallow: /register
+Disallow: /profile
+
+# Canonical Sitemap Reference
+Sitemap: https://ziron.bio/sitemap.xml

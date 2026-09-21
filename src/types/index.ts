@@ -8,6 +8,8 @@ export type PublicRoute =
   | 'science'
   | 'quality'
   | 'verify'
+  | 'verify/certificate'
+  | 'verify-certificate'
   | 'shop'
   | 'about'
   | 'restart'

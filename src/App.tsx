@@ -22,6 +22,16 @@ import { RegisterPage } from '@/pages/RegisterPage';
 import { CommunityPage } from '@/pages/CommunityPage';
 import { SchoolPage } from '@/pages/SchoolPage';
 import { CertificateVerificationPage } from '@/pages/public/CertificateVerificationPage';
+import { NotFoundPage } from '@/pages/NotFoundPage';
+import { SeoHead } from '@/components/seo/SeoHead';
+import { PUBLIC_SEO_CONFIGS } from '@/lib/seo/config';
+import {
+  generateOrganizationSchema,
+  generateWebSiteSchema,
+  generateProductsSchema,
+  generateFaqSchema,
+  generateBreadcrumbSchema,
+} from '@/lib/seo/schemaGenerators';
 
 // Authenticated app pages
 import { DashboardPage } from '@/pages/app/DashboardPage';
@@ -53,7 +63,7 @@ import { AdminPlaceholderPage } from '@/pages/admin/AdminPlaceholderPage';
 import { AdminRouteGuard } from '@/components/guards/AdminRouteGuard';
 
 function RouterOutlet() {
-  const { route } = useI18n();
+  const { route, locale } = useI18n();
   const { user } = useAuth();
 
   // ZIRON Restart Fund route (/restart/fund and /app/restart/fund)
@@ -230,7 +240,12 @@ function RouterOutlet() {
       }
     }
 
-    return <AdminShell>{adminContent}</AdminShell>;
+    return (
+      <AdminShell>
+        <SeoHead noindex title="Admin Console | ZIRON" />
+        {adminContent}
+      </AdminShell>
+    );
   }
 
   // Customer application routes routed through CustomerAppShell
@@ -358,72 +373,141 @@ function RouterOutlet() {
       }
     }
 
-    return <CustomerAppShell>{appContent}</CustomerAppShell>;
+    return (
+      <CustomerAppShell>
+        <SeoHead noindex title="Customer Portal | ZIRON" />
+        {appContent}
+      </CustomerAppShell>
+    );
   }
 
   // Public routes routed through PublicShell
   let publicContent: React.ReactNode;
+  let seoNode: React.ReactNode = null;
+
   switch (route) {
     case 'profile':
+      seoNode = <SeoHead noindex title="Customer Profile | ZIRON" />;
       publicContent = (
         <CustomerRouteGuard>
           <ProfilePage />
         </CustomerRouteGuard>
       );
       break;
-    case 'community':
-      publicContent = <CommunityPage />;
-      break;
-    case 'school':
-      publicContent = <SchoolPage />;
-      break;
-    case 'ziron':
-      publicContent = <ZironProductPage />;
-      break;
-    case 'program':
-      publicContent = <ProgramPage />;
-      break;
-    case 'science':
-      publicContent = <SciencePage />;
-      break;
-    case 'quality':
-      publicContent = <QualityPage />;
-      break;
-    case 'verify':
-      publicContent = <VerifyPage />;
-      break;
-    case 'verify/certificate':
-    case 'verify-certificate':
-      publicContent = <CertificateVerificationPage />;
-      break;
-    case 'shop':
-      publicContent = <ShopPage />;
-      break;
-    case 'about':
-      publicContent = <AboutPage />;
-      break;
-    case 'restart':
-      publicContent = <RestartPage />;
-      break;
-    case 'restart/fund':
-      publicContent = <RestartFundPage />;
-      break;
-    case 'faq':
-      publicContent = <FaqPage />;
-      break;
     case 'login':
+      seoNode = <SeoHead noindex title="Sign In | ZIRON" />;
       publicContent = <LoginPage />;
       break;
     case 'register':
+      seoNode = <SeoHead noindex title="Create Account | ZIRON" />;
       publicContent = <RegisterPage />;
       break;
-    case '':
+    case 'community':
+    case 'school':
+    case 'ziron':
+    case 'program':
+    case 'science':
+    case 'quality':
+    case 'verify':
+    case 'verify/certificate':
+    case 'verify-certificate':
+    case 'shop':
+    case 'about':
+    case 'restart':
+    case 'restart/fund':
+    case 'faq':
+    case '': {
+      const normalizedRoute = route === 'verify-certificate' ? 'verify/certificate' : route;
+      const seoConfig = PUBLIC_SEO_CONFIGS[normalizedRoute] || PUBLIC_SEO_CONFIGS[''];
+      const pageTitle = seoConfig.title[locale] || seoConfig.title.en;
+      const pageDesc = seoConfig.description[locale] || seoConfig.description.en;
+
+      let structuredData: any = null;
+      if (normalizedRoute === '') {
+        structuredData = [generateOrganizationSchema(), generateWebSiteSchema()];
+      } else if (normalizedRoute === 'shop' || normalizedRoute === 'ziron') {
+        structuredData = [
+          ...generateProductsSchema(),
+          generateBreadcrumbSchema(normalizedRoute, pageTitle, locale),
+        ];
+      } else if (normalizedRoute === 'faq') {
+        const faq = generateFaqSchema(locale);
+        const breadcrumb = generateBreadcrumbSchema('faq', pageTitle, locale);
+        structuredData = faq ? [faq, breadcrumb] : [breadcrumb];
+      } else {
+        structuredData = generateBreadcrumbSchema(normalizedRoute, pageTitle, locale);
+      }
+
+      seoNode = (
+        <SeoHead
+          title={pageTitle}
+          description={pageDesc}
+          ogType={seoConfig.ogType || 'website'}
+          route={normalizedRoute}
+          locale={locale}
+          structuredData={structuredData}
+        />
+      );
+
+      switch (normalizedRoute) {
+        case 'community':
+          publicContent = <CommunityPage />;
+          break;
+        case 'school':
+          publicContent = <SchoolPage />;
+          break;
+        case 'ziron':
+          publicContent = <ZironProductPage />;
+          break;
+        case 'program':
+          publicContent = <ProgramPage />;
+          break;
+        case 'science':
+          publicContent = <SciencePage />;
+          break;
+        case 'quality':
+          publicContent = <QualityPage />;
+          break;
+        case 'verify':
+          publicContent = <VerifyPage />;
+          break;
+        case 'verify/certificate':
+          publicContent = <CertificateVerificationPage />;
+          break;
+        case 'shop':
+          publicContent = <ShopPage />;
+          break;
+        case 'about':
+          publicContent = <AboutPage />;
+          break;
+        case 'restart':
+          publicContent = <RestartPage />;
+          break;
+        case 'restart/fund':
+          publicContent = <RestartFundPage />;
+          break;
+        case 'faq':
+          publicContent = <FaqPage />;
+          break;
+        case '':
+        default:
+          publicContent = <HomePage />;
+          break;
+      }
+      break;
+    }
     default:
-      publicContent = <HomePage />;
+      seoNode = <SeoHead noindex title="404 — Page Not Found | ZIRON" />;
+      publicContent = <NotFoundPage />;
       break;
   }
 
-  return <PublicShell>{publicContent}</PublicShell>;
+  return (
+    <PublicShell>
+      {seoNode}
+      {publicContent}
+    </PublicShell>
+  );
 }
 
 export default function App() {
